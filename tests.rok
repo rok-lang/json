@@ -4,7 +4,6 @@
 use rok::std::fs;
 use rok::std::io::{Reader, IoError};
 use pkg::{Value, JsonError, Event, Tokenizer};
-use pkg::json;
 
 fn expect(ok: bool, what: str) {
     if !ok { panic(f"check failed: {what}"); }

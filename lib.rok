@@ -12,8 +12,6 @@ pub mod read;
 pub mod write;
 
 #[cfg(test)]
-mod json;
-#[cfg(test)]
 mod tests;
 
 pub use read::{Event, Tokenizer, MAX_DEPTH};
@@ -367,22 +365,22 @@ pub fn unknown_variant(v: str, ctx: str) -> JsonError {
 /// else `none` for `T | none`, else is an error.
 #[impl_derive(Json)]
 pub @derive {
-    @where_all(json::ToJson)
-    impl json::ToJson for @Self {
-        fn to_json(self) -> json::Value {
+    @where_all(pkg::ToJson)
+    impl pkg::ToJson for @Self {
+        fn to_json(self) -> pkg::Value {
             @if_struct {
                 @apply_if(@Self.is_tuple) {
-                    return json::pack([@for_fields { json::encode::<@field.type>(self.@field), }]);
+                    return pkg::pack([@for_fields { pkg::encode::<@field.type>(self.@field), }]);
                 }
                 @apply_if(@Self.is_unit) {
-                    return json::Value::Null;
+                    return pkg::Value::Null;
                 }
                 @apply_if(@Self.is_named) {
-                    let m: OrderedDict<str, json::Value> = OrderedDict::new();
+                    let m: OrderedDict<str, pkg::Value> = OrderedDict::new();
                     @for_fields {
-                        m.insert(@field.name.as_str(), json::encode::<@field.type>(self.@field));
+                        m.insert(@field.name.as_str(), pkg::encode::<@field.type>(self.@field));
                     }
-                    return json::Value::Object(m);
+                    return pkg::Value::Object(m);
                 }
             }
             @if_enum {
@@ -390,21 +388,21 @@ pub @derive {
                     @for_variants {
                         @variant.pattern => {
                             @apply_if(@variant.is_unit) {
-                                json::Value::Str(@variant.name.as_str())
+                                pkg::Value::Str(@variant.name.as_str())
                             }
                             @apply_if(@variant.is_tuple) {
-                                let m: OrderedDict<str, json::Value> = OrderedDict::new();
-                                m.insert(@variant.name.as_str(), json::pack([@for_variant_fields { json::encode::<@field.type>(@field), }]));
-                                json::Value::Object(m)
+                                let m: OrderedDict<str, pkg::Value> = OrderedDict::new();
+                                m.insert(@variant.name.as_str(), pkg::pack([@for_variant_fields { pkg::encode::<@field.type>(@field), }]));
+                                pkg::Value::Object(m)
                             }
                             @apply_if(@variant.is_named) {
-                                let fs: OrderedDict<str, json::Value> = OrderedDict::new();
+                                let fs: OrderedDict<str, pkg::Value> = OrderedDict::new();
                                 @for_variant_fields {
-                                    fs.insert(@field.name.as_str(), json::encode::<@field.type>(@field));
+                                    fs.insert(@field.name.as_str(), pkg::encode::<@field.type>(@field));
                                 }
-                                let m: OrderedDict<str, json::Value> = OrderedDict::new();
-                                m.insert(@variant.name.as_str(), json::Value::Object(fs));
-                                json::Value::Object(m)
+                                let m: OrderedDict<str, pkg::Value> = OrderedDict::new();
+                                m.insert(@variant.name.as_str(), pkg::Value::Object(fs));
+                                pkg::Value::Object(m)
                             }
                         },
                     }
@@ -413,22 +411,22 @@ pub @derive {
         }
     }
 
-    @where_all(json::FromJson)
-    impl json::FromJson for @Self {
-        fn from_json(v: json::Value) throws (json::JsonError) -> Self {
+    @where_all(pkg::FromJson)
+    impl pkg::FromJson for @Self {
+        fn from_json(v: pkg::Value) throws (pkg::JsonError) -> Self {
             @if_struct {
                 @apply_if(@Self.is_tuple) {
-                    let xs = try json::unpack(v, @Self.as_str(), [@for_fields { 0, }].len());
+                    let xs = try pkg::unpack(v, @Self.as_str(), [@for_fields { 0, }].len());
                     return @Self(@for_fields {
-                        try json::decode::<@field.type>(xs[@field.name], if xs.len() == 1 { "" } else { "/" + @field.name.as_str() }),
+                        try pkg::decode::<@field.type>(xs[@field.name], if xs.len() == 1 { "" } else { "/" + @field.name.as_str() }),
                     });
                 }
                 @apply_if(@Self.is_unit) {
-                    if v != json::Value::Null { throw json::JsonError::new(f"expected {@Self.as_str()} (null), found {v.kind()}"); }
+                    if v != pkg::Value::Null { throw pkg::JsonError::new(f"expected {@Self.as_str()} (null), found {v.kind()}"); }
                     return @Self;
                 }
                 @apply_if(@Self.is_named) {
-                    let fs = try json::Fields::of(v, @Self.as_str(), [@for_fields { @field.name.as_str(), }]);
+                    let fs = try pkg::Fields::of(v, @Self.as_str(), [@for_fields { @field.name.as_str(), }]);
                     return @Self {
                         @for_fields {
                             @apply_if(@field.has_default) {
@@ -446,43 +444,43 @@ pub @derive {
                 }
             }
             @if_enum {
-                let (name, p) = try json::variant_of(v, @Self.as_str());
+                let (name, p) = try pkg::variant_of(v, @Self.as_str());
                 @for_variants {
                     if name == @variant.name.as_str() {
                         @apply_if(@variant.is_unit) {
-                            try json::no_payload(p, @Self.as_str(), name);
+                            try pkg::no_payload(p, @Self.as_str(), name);
                             return @Self.name::@variant.name;
                         }
                         @apply_if(@variant.is_tuple) {
                             let n = [@for_variant_fields { 0, }].len();
                             let ctx = @Self.as_str() + "::" + name;
-                            let xs = try json::unpack(try json::payload(p, @Self.as_str(), name), ctx, n) catch e { throw e.within(json::seg(name)); };
+                            let xs = try pkg::unpack(try pkg::payload(p, @Self.as_str(), name), ctx, n) catch e { throw e.within(pkg::seg(name)); };
                             return @Self.name::@variant.name(@for_variant_fields {
-                                try json::decode::<@field.type>(xs[@field.name], json::seg(name) + if n == 1 { "" } else { "/" + @field.name.as_str() }),
+                                try pkg::decode::<@field.type>(xs[@field.name], pkg::seg(name) + if n == 1 { "" } else { "/" + @field.name.as_str() }),
                             });
                         }
                         @apply_if(@variant.is_named) {
                             let ctx = @Self.as_str() + "::" + name;
-                            let fs = try json::Fields::of(try json::payload(p, @Self.as_str(), name), ctx,
-                                [@for_variant_fields { @field.name.as_str(), }]) catch e { throw e.within(json::seg(name)); };
+                            let fs = try pkg::Fields::of(try pkg::payload(p, @Self.as_str(), name), ctx,
+                                [@for_variant_fields { @field.name.as_str(), }]) catch e { throw e.within(pkg::seg(name)); };
                             return @Self.name::@variant.name {
                                 @for_variant_fields {
                                     @apply_if(@field.has_default) {
                                         @field.name: if fs.has(@field.name.as_str()) {
-                                            try fs.get::<@field.type>(@field.name.as_str()) catch e { throw e.within(json::seg(name)); }
+                                            try fs.get::<@field.type>(@field.name.as_str()) catch e { throw e.within(pkg::seg(name)); }
                                         } else {
                                             @field.default
                                         },
                                     }
                                     @apply_if(!@field.has_default) {
-                                        @field.name: try fs.get::<@field.type>(@field.name.as_str()) catch e { throw e.within(json::seg(name)); },
+                                        @field.name: try fs.get::<@field.type>(@field.name.as_str()) catch e { throw e.within(pkg::seg(name)); },
                                     }
                                 }
                             };
                         }
                     }
                 }
-                throw json::unknown_variant(name, @Self.as_str());
+                throw pkg::unknown_variant(name, @Self.as_str());
             }
         }
     }

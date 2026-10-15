@@ -244,9 +244,7 @@ impl Tokenizer {
             for k in int_start..j { v = v * 10 + (s.byte(k) - 0x30u8) as i64; }
             return Event::Int(Int::from_i64(if int_start > at { -v } else { v }));
         }
-        let x: f64 = try text.parse::<f64>() catch _ { throw self.fail(at, "malformed number"); };
-        if !x.is_finite() { throw self.fail(at, "number out of range"); }
-        Event::Float(x)
+        Event::Float(try text.parse::<f64>() catch e { throw self.fail(at, e.reason); })
     }
 
     /// The string starting with the `"` at `at`.
