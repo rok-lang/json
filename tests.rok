@@ -312,7 +312,7 @@ fn typed_errors() {
     expect(e6 == "4:31: expected i32, found string [/limits/mem]", e6);
 }
 
-// ---- benchmarks (`rok bench`): about 4 MB of mixed records ----
+// ---- benchmarks (`rok bench`): 6.8 MB of mixed records ----
 
 fn bench_doc() -> str {
     let b = StrBuf::new();
@@ -328,14 +328,14 @@ fn bench_doc() -> str {
 }
 
 #[bench]
-fn parse_4mb() {
+fn parse_records() {
     let s = bench_doc();
     let v = try pkg::parse(s) catch e { panic(f"{e}"); };
     expect(v.at(0) is Value, "parsed");
 }
 
 #[bench]
-fn serialize_4mb() {
+fn serialize_records() {
     let v = try pkg::parse(bench_doc()) catch e { panic(f"{e}"); };
     expect(v.to_string().len() > 0, "written");
 }

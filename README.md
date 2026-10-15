@@ -109,7 +109,7 @@ fn count_ids(path: str) throws -> usize {
 
 ## Performance
 
-`rok bench` (`-O2`, Apple M-series), on a 6.8 MB document of 25 000 records:
+An `-O2` build on Apple M-series, on a 6.8 MB document of 25 000 records (`rok bench` runs the same document):
 
 | | Time | Throughput |
 |-|------|------------|
