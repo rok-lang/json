@@ -1,0 +1,8 @@
+Package {
+    name: "json",
+    version: "0.1.0",
+    description: "JSON (RFC 8259): Value tree, strict parser, streaming tokenizer, typed encode/decode, JSON Pointer",
+    license: "MIT OR Apache-2.0",
+    repository: "https://github.com/rok-lang/json",
+    deps: {},
+}

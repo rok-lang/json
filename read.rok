@@ -1,0 +1,529 @@
+// Pull tokenizer and parser. The tokenizer reads a window of the input
+// (all of it for a `str`, chunks for a reader) and yields `Event`s,
+// checking the grammar as it goes; `parse` builds a `Value` from them.
+
+use rok::std::io::{Reader, IoError};
+use pkg::{Value, JsonError};
+
+/// One step of a document, in order. Every `BeginObject` / `BeginArray`
+/// is matched by its `End*`; inside an object each value follows its
+/// `Key`. `End` comes once, after the top-level value.
+#[derive(Clone, PartialEq, Debug)]
+pub enum Event {
+    BeginObject,
+    EndObject,
+    BeginArray,
+    EndArray,
+    Key(str),
+    Null,
+    Bool(bool),
+    Int(int),
+    Float(f64),
+    Str(str),
+    End,
+}
+
+/// Nesting limit of `parse` / `from_str` / `Tokenizer::new`.
+pub const MAX_DEPTH: usize = 128;
+
+const CHUNK: usize = 65536;
+
+// What the next token may be.
+const E_VALUE: i32 = 0;
+const E_VALUE_OR_CLOSE: i32 = 1;
+const E_KEY: i32 = 2;
+const E_KEY_OR_CLOSE: i32 = 3;
+const E_COLON: i32 = 4;
+const E_COMMA_OR_CLOSE: i32 = 5;
+const E_EOF: i32 = 6;
+const E_DONE: i32 = 7;
+
+const QUOTE: u8 = 0x22u8;
+const BSLASH: u8 = 0x5Cu8;
+
+/// A JSON reader yielding `Event`s. `new` reads a string; `from_reader`
+/// reads any `io::Reader` in 64 KiB chunks and keeps only the unread part
+/// of the current chunk, so memory stays flat for large inputs.
+pub struct Tokenizer {
+    /// Nesting limit; deeper input is an error.
+    pub max_depth: usize;
+    src: str;
+    i: usize;
+    eof: bool;
+    fill: fn(List<u8>) throws (IoError) -> usize;
+    /// An incomplete UTF-8 sequence at the end of the last chunk.
+    tail: List<u8>;
+    /// The read buffer (empty until the first read).
+    buf: List<u8>;
+    /// Line / column (1-based, code points) of `src`'s first byte.
+    line: u32;
+    col: u32;
+    /// Open containers, `true` for an object.
+    stack: List<bool>;
+    expect: i32;
+    /// Window index where the last event's token starts.
+    at: usize;
+}
+
+impl Tokenizer {
+    /// Read `s`.
+    pub fn new(s: str) -> Tokenizer {
+        Tokenizer::make(s, true, |_| 0)
+    }
+
+    /// Read `r` to its end.
+    pub fn from_reader<R: Reader>(r: R) -> Tokenizer {
+        Tokenizer::make("", false, [ref r] |b| try r.read(b))
+    }
+
+    fn make(s: str, eof: bool, fill: fn(List<u8>) throws (IoError) -> usize) -> Tokenizer {
+        Tokenizer {
+            max_depth: MAX_DEPTH, src: s, i: 0, eof: eof, fill: fill, tail: List::new(), buf: List::new(),
+            line: 1u32, col: 1u32, stack: List::new(), expect: E_VALUE, at: 0,
+        }
+    }
+
+    /// Nesting depth after the last event.
+    pub fn depth(self) -> usize { self.stack.len() }
+
+    /// `(line, col)` where the last event's token starts.
+    pub fn position(self) -> (u32, u32) { self.pos(self.at) }
+
+    /// The next event. After `End` it keeps returning `End`.
+    pub fn next(ref self) throws (JsonError) -> Event {
+        loop {
+            match try self.step() {
+                e: Event => return e,
+                none => try self.refill(),
+            }
+        }
+    }
+
+    /// One token, or `none` when the window ends inside it (more input
+    /// is needed; nothing has been consumed).
+    fn step(ref self) throws (JsonError) -> Event | none {
+        let n = self.src.len();
+        loop {
+            while self.i < n {
+                let b = self.src.byte(self.i);
+                if b != 0x20u8 && b != 0x0Au8 && b != 0x0Du8 && b != 0x09u8 { break; }
+                self.i += 1;
+            }
+            if self.i >= n {
+                if !self.eof { return none; }
+                self.at = self.i;
+                if self.expect == E_EOF || self.expect == E_DONE {
+                    self.expect = E_DONE;
+                    return Event::End;
+                }
+                throw self.fail(self.i, "unexpected end of input");
+            }
+            let at = self.i;
+            let b = self.src.byte(at);
+            let ex = self.expect;
+            if ex == E_COLON {
+                if b != 0x3Au8 { throw self.found(at, "`:`"); }
+                self.i += 1;
+                self.expect = E_VALUE;
+                continue;
+            }
+            if ex == E_COMMA_OR_CLOSE {
+                let obj = self.stack[self.stack.len() - 1];
+                if b == 0x2Cu8 {
+                    self.i += 1;
+                    self.expect = if obj { E_KEY } else { E_VALUE };
+                    continue;
+                }
+                if obj && b == 0x7Du8 { return self.close(at, Event::EndObject); }
+                if !obj && b == 0x5Du8 { return self.close(at, Event::EndArray); }
+                throw self.found(at, if obj { "`,` or `}`" } else { "`,` or `]`" });
+            }
+            if ex == E_EOF || ex == E_DONE { throw self.found(at, "the end of the document"); }
+            self.at = at;
+            if ex == E_KEY || ex == E_KEY_OR_CLOSE {
+                if b == 0x7Du8 && ex == E_KEY_OR_CLOSE { return self.close(at, Event::EndObject); }
+                if b != QUOTE { throw self.found(at, if ex == E_KEY { "a string key" } else { "a string key or `}`" }); }
+                let s = try self.string(at)?;
+                self.expect = E_COLON;
+                return Event::Key(s);
+            }
+            // A value.
+            if b == 0x5Du8 && ex == E_VALUE_OR_CLOSE { return self.close(at, Event::EndArray); }
+            if b == 0x7Bu8 || b == 0x5Bu8 {
+                if self.stack.len() >= self.max_depth {
+                    throw self.fail(at, f"nesting deeper than {self.max_depth}");
+                }
+                self.i += 1;
+                self.stack.push(b == 0x7Bu8);
+                self.expect = if b == 0x7Bu8 { E_KEY_OR_CLOSE } else { E_VALUE_OR_CLOSE };
+                return if b == 0x7Bu8 { Event::BeginObject } else { Event::BeginArray };
+            }
+            let e: Event = if b == QUOTE {
+                Event::Str(try self.string(at)?)
+            } else if b == 0x2Du8 || (b >= 0x30u8 && b <= 0x39u8) {
+                try self.number(at)?
+            } else if b == 0x74u8 {
+                try self.word(at, "true")?;
+                Event::Bool(true)
+            } else if b == 0x66u8 {
+                try self.word(at, "false")?;
+                Event::Bool(false)
+            } else if b == 0x6Eu8 {
+                try self.word(at, "null")?;
+                Event::Null
+            } else {
+                throw self.found(at, "a value");
+            };
+            self.after_value();
+            return e;
+        }
+    }
+
+    fn close(ref self, at: usize, e: Event) -> Event {
+        self.at = at;
+        self.i = at + 1;
+        self.stack.pop();
+        self.after_value();
+        e
+    }
+
+    fn after_value(ref self) {
+        self.expect = if self.stack.is_empty() { E_EOF } else { E_COMMA_OR_CLOSE };
+    }
+
+    /// `true` / `false` / `null` at `at`.
+    fn word(ref self, at: usize, w: str) throws (JsonError) -> bool | none {
+        let n = self.src.len();
+        for k in 0..w.len() {
+            if at + k >= n {
+                if self.eof { throw self.fail(at, "unexpected end of input"); }
+                return none;
+            }
+            if self.src.byte(at + k) != w.byte(k) { throw self.found(at, "a value"); }
+        }
+        self.i = at + w.len();
+        true
+    }
+
+    /// `-? (0 | [1-9][0-9]*) (. [0-9]+)? ([eE] [+-]? [0-9]+)?`
+    fn number(ref self, at: usize) throws (JsonError) -> Event | none {
+        let s = self.src;
+        let n = s.len();
+        let j = at;
+        if s.byte(j) == 0x2Du8 { j += 1; }
+        let int_start = j;
+        while j < n && is_digit(s.byte(j)) { j += 1; }
+        if j >= n && !self.eof { return none; }
+        if j == int_start { throw self.fail(at, "expected digits after `-`"); }
+        if s.byte(int_start) == 0x30u8 && j - int_start > 1 { throw self.fail(at, "leading zeros are not allowed"); }
+        let is_float = false;
+        if j < n && s.byte(j) == 0x2Eu8 {
+            is_float = true;
+            j += 1;
+            let d = j;
+            while j < n && is_digit(s.byte(j)) { j += 1; }
+            if j >= n && !self.eof { return none; }
+            if j == d { throw self.fail(at, "expected digits after `.`"); }
+        }
+        if j < n && (s.byte(j) == 0x65u8 || s.byte(j) == 0x45u8) {
+            is_float = true;
+            j += 1;
+            if j < n && (s.byte(j) == 0x2Bu8 || s.byte(j) == 0x2Du8) { j += 1; }
+            let d = j;
+            while j < n && is_digit(s.byte(j)) { j += 1; }
+            if j >= n && !self.eof { return none; }
+            if j == d { throw self.fail(at, "expected digits in the exponent"); }
+        }
+        let text = s[at:j];
+        self.i = j;
+        if !is_float {
+            if text == "-0" { return Event::Float(-0.0); }
+            if j - int_start > 18 { return Event::Int(Int::from_literal(text)); }
+            // Fits an i64: skip the general (BigInt) path.
+            let v = 0i64;
+            for k in int_start..j { v = v * 10 + (s.byte(k) - 0x30u8) as i64; }
+            return Event::Int(Int::from_i64(if int_start > at { -v } else { v }));
+        }
+        let x: f64 = try text.parse::<f64>() catch _ { throw self.fail(at, "malformed number"); };
+        if !x.is_finite() { throw self.fail(at, "number out of range"); }
+        Event::Float(x)
+    }
+
+    /// The string starting with the `"` at `at`.
+    fn string(ref self, at: usize) throws (JsonError) -> str | none {
+        let s = self.src;
+        let n = s.len();
+        let j = at + 1;
+        while j < n {
+            let b = s.byte(j);
+            if b == QUOTE {
+                self.i = j + 1;
+                return s[at + 1:j];
+            }
+            if b == BSLASH || b < 0x20u8 { break; }
+            j += 1;
+        }
+        let out = StrBuf::new();
+        out.push_str(s[at + 1:j]);
+        loop {
+            if j >= n {
+                if self.eof { throw self.fail(at, "unterminated string"); }
+                return none;
+            }
+            let b = s.byte(j);
+            if b == QUOTE { break; }
+            if b < 0x20u8 { throw self.fail(j, "control character in string (escape it)"); }
+            if b != BSLASH {
+                let k = j + 1;
+                while k < n && s.byte(k) != QUOTE && s.byte(k) != BSLASH && s.byte(k) >= 0x20u8 { k += 1; }
+                out.push_str(s[j:k]);
+                j = k;
+                continue;
+            }
+            if j + 1 >= n {
+                if self.eof { throw self.fail(at, "unterminated string"); }
+                return none;
+            }
+            let e = s.byte(j + 1);
+            if e == 0x75u8 {
+                let hi = try self.hex4(j)?;
+                if hi >= 0xDC00u32 && hi <= 0xDFFFu32 { throw self.fail(j, "lone low surrogate in `\\u` escape"); }
+                if hi >= 0xD800u32 && hi <= 0xDBFFu32 {
+                    if j + 7 >= n && !self.eof { return none; }
+                    if j + 7 >= n || s.byte(j + 6) != BSLASH || s.byte(j + 7) != 0x75u8 {
+                        throw self.fail(j, "lone high surrogate in `\\u` escape");
+                    }
+                    let lo = try self.hex4(j + 6)?;
+                    if lo < 0xDC00u32 || lo > 0xDFFFu32 { throw self.fail(j, "lone high surrogate in `\\u` escape"); }
+                    out.push(char::from_u32(0x10000u32 + ((hi - 0xD800u32) << 10u32) + (lo - 0xDC00u32)) ?? '\0');
+                    j += 12;
+                } else {
+                    out.push(char::from_u32(hi) ?? '\0');
+                    j += 6;
+                }
+                continue;
+            }
+            let c = match simple_escape(e) {
+                c: char => c,
+                none => throw self.fail(j, "unknown escape"),
+            };
+            out.push(c);
+            j += 2;
+        }
+        self.i = j + 1;
+        out.to_str()
+    }
+
+    /// The 4 hex digits of the `\u` escape at `j`.
+    fn hex4(self, j: usize) throws (JsonError) -> u32 | none {
+        let s = self.src;
+        if j + 6 > s.len() {
+            if self.eof { throw self.fail(j, "unterminated string"); }
+            return none;
+        }
+        let v = 0u32;
+        for k in j + 2..j + 6 {
+            let d = match hex_digit(s.byte(k)) {
+                d: u32 => d,
+                none => throw self.fail(j, "`\\u` needs 4 hex digits"),
+            };
+            v = v * 16u32 + d;
+        }
+        v
+    }
+
+    /// Drop the consumed part of the window and append the next chunk.
+    fn refill(ref self) throws (JsonError) {
+        // Keep the last event's token too, for `position`.
+        let keep = self.at.min(self.i);
+        let (l, c) = self.pos(keep);
+        self.line = l;
+        self.col = c;
+        let rest = self.src[keep:];
+        self.i -= keep;
+        self.at = if self.at >= keep { self.at - keep } else { 0 };
+        if self.buf.is_empty() {
+            for _ in 0..CHUNK { self.buf.push(0u8); }
+        }
+        let buf = self.buf;
+        let got = try (self.fill)(buf) catch e { throw JsonError::new(f"read error: {e}"); };
+        let bytes: List<u8> = self.tail;
+        for k in 0..got { bytes.push(buf[k]); }
+        self.tail = List::new();
+        if got == 0 {
+            self.eof = true;
+        } else {
+            // Keep an incomplete trailing UTF-8 sequence for the next chunk.
+            let cut = bytes.len();
+            let back = 0usize;
+            while back < 3 && back < cut && (bytes[cut - 1 - back] & 0xC0u8) == 0x80u8 { back += 1; }
+            if back < cut {
+                let lead = bytes[cut - 1 - back];
+                let need = if lead >= 0xF0u8 { 4usize } else if lead >= 0xE0u8 { 3usize } else if lead >= 0xC0u8 { 2usize } else { 1usize };
+                if need > back + 1 {
+                    for k in cut - 1 - back..cut { self.tail.push(bytes[k]); }
+                    bytes = bytes[:cut - 1 - back].to_list();
+                }
+            }
+        }
+        if self.eof && !self.tail.is_empty() { throw self.fail(self.i, "invalid UTF-8"); }
+        let text = try str::from_utf8(bytes) catch _ { throw self.fail(self.src.len() - keep, "invalid UTF-8"); };
+        self.src = rest + text;
+    }
+
+    /// `(line, col)` of window index `k`.
+    fn pos(self, k: usize) -> (u32, u32) {
+        let line = self.line;
+        let col = self.col;
+        let s = self.src;
+        let j = 0usize;
+        let end = k.min(s.len());
+        while j < end {
+            let b = s.byte(j);
+            if b == 0x0Au8 || (b == 0x0Du8 && (j + 1 >= s.len() || s.byte(j + 1) != 0x0Au8)) {
+                line += 1u32;
+                col = 1u32;
+            } else if (b & 0xC0u8) != 0x80u8 && b != 0x0Du8 {
+                col += 1u32;
+            }
+            j += 1;
+        }
+        (line, col)
+    }
+
+    fn fail(self, k: usize, msg: str) -> JsonError {
+        let (l, c) = self.pos(k);
+        let e = JsonError::new(msg);
+        e.line = l;
+        e.col = c;
+        e
+    }
+
+    /// "expected `what`, found ..." at `k`.
+    fn found(self, k: usize, what: str) -> JsonError {
+        let c = self.src[k:].chars().next() ?? ' ';
+        self.fail(k, f"expected {what}, found {c:?}")
+    }
+}
+
+fn is_digit(b: u8) -> bool { b >= 0x30u8 && b <= 0x39u8 }
+
+fn hex_digit(b: u8) -> u32 | none {
+    if b >= 0x30u8 && b <= 0x39u8 { return (b - 0x30u8) as u32; }
+    if b >= 0x61u8 && b <= 0x66u8 { return (b - 0x57u8) as u32; }
+    if b >= 0x41u8 && b <= 0x46u8 { return (b - 0x37u8) as u32; }
+    none
+}
+
+/// The character of escape `\e` (other than `\u`).
+fn simple_escape(e: u8) -> char | none {
+    if e == QUOTE { return '"'; }
+    if e == BSLASH { return '\\'; }
+    if e == 0x2Fu8 { return '/'; }
+    if e == 0x62u8 { return '\x08'; }
+    if e == 0x66u8 { return '\x0C'; }
+    if e == 0x6Eu8 { return '\n'; }
+    if e == 0x72u8 { return '\r'; }
+    if e == 0x74u8 { return '\t'; }
+    none
+}
+
+/// Read one document into a `Value`.
+pub fn parse_with(t: Tokenizer) throws (JsonError) -> Value {
+    let e = try t.next();
+    let v = try value(ref t, e);
+    try t.next();
+    v
+}
+
+fn value(ref t: Tokenizer, e: Event) throws (JsonError) -> Value {
+    match e {
+        Event::Null => Value::Null,
+        Event::Bool(b) => Value::Bool(b),
+        Event::Int(n) => Value::Int(n),
+        Event::Float(x) => Value::Float(x),
+        Event::Str(s) => Value::Str(s),
+        Event::BeginArray => {
+            let xs: List<Value> = List::new();
+            loop {
+                let e = try t.next();
+                if e == Event::EndArray { break; }
+                xs.push(try value(ref t, e));
+            }
+            Value::Array(xs)
+        },
+        Event::BeginObject => {
+            let m: OrderedDict<str, Value> = OrderedDict::new();
+            loop {
+                match try t.next() {
+                    Event::Key(k) => {
+                        let e = try t.next();
+                        m.insert(k, try value(ref t, e));
+                    },
+                    _ => break,
+                }
+            }
+            Value::Object(m)
+        },
+        _ => throw JsonError::new("unexpected event"),
+    }
+}
+
+/// `e` (from decoding `s`) with the `line:col` of the value or key at
+/// `e.path` (a JSON Pointer).
+pub fn locate(s: str, e: JsonError) -> JsonError {
+    let t = Tokenizer::new(s);
+    // One segment per open container, and its next array index (-1 for
+    // an object).
+    let segs: List<str> = List::new();
+    let next: List<i64> = List::new();
+    let key = "";
+    loop {
+        let ev = try t.next() catch _ { return e; };
+        match ev {
+            Event::End => break,
+            Event::Key(k) => {
+                key = "/" + pkg::escape_token(k);
+                if e.on_key && segs.join("") + key == e.path { return placed(t, e); }
+                continue;
+            },
+            Event::EndObject => {
+                segs.pop();
+                next.pop();
+                continue;
+            },
+            Event::EndArray => {
+                segs.pop();
+                next.pop();
+                continue;
+            },
+            _ => {},
+        }
+        let seg = "";
+        if !next.is_empty() {
+            let top = next.len() - 1;
+            if next[top] < 0 {
+                seg = key;
+            } else {
+                seg = f"/{next[top]}";
+                next[top] = next[top] + 1;
+            }
+        }
+        if !e.on_key && segs.join("") + seg == e.path { return placed(t, e); }
+        if ev == Event::BeginObject || ev == Event::BeginArray {
+            segs.push(seg);
+            next.push(if ev == Event::BeginObject { -1 } else { 0 });
+        }
+    }
+    e
+}
+
+fn placed(t: Tokenizer, e: JsonError) -> JsonError {
+    let (l, c) = t.position();
+    let p = JsonError::new(e.msg);
+    p.line = l;
+    p.col = c;
+    p.path = e.path;
+    p.on_key = e.on_key;
+    p
+}

@@ -1,0 +1,7 @@
+// The package under its own name, for `#[derive(Json)]` in its tests:
+// the derive's paths resolve at the use site.
+
+pub use pkg::{
+    Value, JsonError, ToJson, FromJson, Fields, encode, decode, pack, unpack, variant_of, payload,
+    no_payload, unknown_variant, seg,
+};

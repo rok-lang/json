@@ -1,0 +1,98 @@
+// JSON text of a `Value`: compact or indented.
+
+use pkg::Value;
+
+/// `v` into `out`; `indent` > 0 puts each member on its own line,
+/// `indent` spaces per level (`level` is the current one).
+pub fn value(out: StrBuf, v: Value, indent: usize, level: usize) {
+    match v {
+        Value::Null => out.push_str("null"),
+        Value::Bool(b) => out.push_str(if b { "true" } else { "false" }),
+        Value::Int(n) => out.push_str(f"{n}"),
+        Value::Float(x) => out.push_str(float_text(x)),
+        Value::Str(s) => string(out, s),
+        Value::Array(xs) => {
+            if xs.is_empty() {
+                out.push_str("[]");
+                return;
+            }
+            out.push('[');
+            let first = true;
+            for x in xs {
+                if !first { out.push(','); }
+                first = false;
+                newline(out, indent, level + 1);
+                value(out, x, indent, level + 1);
+            }
+            newline(out, indent, level);
+            out.push(']');
+        },
+        Value::Object(m) => {
+            if m.is_empty() {
+                out.push_str("{}");
+                return;
+            }
+            out.push('{');
+            let first = true;
+            for (k, x) in m.entries() {
+                if !first { out.push(','); }
+                first = false;
+                newline(out, indent, level + 1);
+                string(out, k);
+                out.push_str(if indent > 0 { ": " } else { ":" });
+                value(out, x, indent, level + 1);
+            }
+            newline(out, indent, level);
+            out.push('}');
+        },
+    }
+}
+
+fn newline(out: StrBuf, indent: usize, level: usize) {
+    if indent == 0 { return; }
+    out.push('\n');
+    out.push_str(" ".repeat(indent * level));
+}
+
+/// `s` quoted: `"` `\` and control characters escaped, the rest as is.
+pub fn string(out: StrBuf, s: str) {
+    out.push('"');
+    let n = s.len();
+    let from = 0usize;
+    for i in 0..n {
+        let b = s.byte(i);
+        if b >= 0x20u8 && b != 0x22u8 && b != 0x5Cu8 { continue; }
+        out.push_str(s[from:i]);
+        from = i + 1;
+        if b == 0x22u8 {
+            out.push_str("\\\"");
+        } else if b == 0x5Cu8 {
+            out.push_str("\\\\");
+        } else if b == 0x0Au8 {
+            out.push_str("\\n");
+        } else if b == 0x0Du8 {
+            out.push_str("\\r");
+        } else if b == 0x09u8 {
+            out.push_str("\\t");
+        } else if b == 0x08u8 {
+            out.push_str("\\b");
+        } else if b == 0x0Cu8 {
+            out.push_str("\\f");
+        } else {
+            let h = b as u32;
+            out.push_str(f"\\u{h:04x}");
+        }
+    }
+    out.push_str(s[from:]);
+    out.push('"');
+}
+
+/// The shortest digits that read back as `x`, with a `.0` or an exponent
+/// so it reads back as a float. NaN / infinity have no JSON form: a
+/// panic (check `is_finite` first when the data may hold them).
+pub fn float_text(x: f64) -> str {
+    if !x.is_finite() { panic("NaN/infinity has no JSON form"); }
+    let a = x.abs();
+    let t = if a != 0.0 && (a < 1e-6 || a >= 1e21) { f"{x:e}" } else { f"{x}" };
+    if t.contains(".") || t.contains("e") { t } else { t + ".0" }
+}

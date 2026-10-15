@@ -1,0 +1,346 @@
+// Tests: JSONTestSuite (tests/jsontestsuite.txt), round trips, errors,
+// JSON Pointer, typed decode / encode.
+
+use rok::std::fs;
+use rok::std::io::{Reader, IoError};
+use pkg::{Value, JsonError, Event, Tokenizer};
+use pkg::json;
+
+fn expect(ok: bool, what: str) {
+    if !ok { panic(f"check failed: {what}"); }
+}
+
+fn hex_bytes(h: str) -> List<u8> {
+    let out: List<u8> = List::with_capacity(h.len() / 2);
+    let i = 0usize;
+    while i + 1 < h.len() {
+        let n = Int::parse_radix(h[i:i + 2], 16u32) ?? Int::from(0);
+        out.push((n.to_i64() ?? 0) as u8);
+        i += 2;
+    }
+    out
+}
+
+/// (name, bytes) of every suite case.
+fn suite() -> List<(str, List<u8>)> {
+    let text = try fs::read_to_str("tests/jsontestsuite.txt") catch e { panic(f"{e}"); };
+    let out: List<(str, List<u8>)> = List::new();
+    for line in text.lines() {
+        if line.starts_with("#") || line.is_empty() { continue; }
+        let (name, h) = line.split_once(" ") ?? (line, "");
+        out.push((name, hex_bytes(h)));
+    }
+    let deep: List<u8> = List::new();
+    for _ in 0..100000 { deep.push(0x5Bu8); }
+    out.push(("n_structure_100000_opening_arrays.json", deep));
+    let open: List<u8> = List::new();
+    for _ in 0..50000 {
+        for b in "[{\"\":".bytes() { open.push(b); }
+    }
+    open.push(0x0Au8);
+    out.push(("n_structure_open_array_object.json", open));
+    out
+}
+
+/// A reader handing out `step` bytes at a time.
+struct Chunks {
+    data: List<u8>;
+    at: usize;
+    step: usize;
+}
+
+impl Reader for Chunks {
+    fn read(ref self, buf: List<u8>) throws (IoError) -> usize {
+        let n = 0usize;
+        while n < self.step && n < buf.len() && self.at < self.data.len() {
+            buf[n] = self.data[self.at];
+            n += 1;
+            self.at += 1;
+        }
+        n
+    }
+}
+
+fn parse_bytes(b: List<u8>) throws (JsonError) -> Value {
+    let s = try str::from_utf8(b) catch _ { throw JsonError::new("invalid UTF-8"); };
+    try pkg::parse(s)
+}
+
+fn parse_stream(b: List<u8>, step: usize) throws (JsonError) -> Value {
+    try pkg::parse_tokens(Tokenizer::from_reader(Chunks { data: b, at: 0, step: step }))
+}
+
+#[test]
+fn json_test_suite() {
+    let yes = 0;
+    let no = 0;
+    let i_acc: List<str> = List::new();
+    let i_rej: List<str> = List::new();
+    let bad: List<str> = List::new();
+    for (name, b) in suite() {
+        let ok = true;
+        let r = try parse_bytes(b) catch _ {
+            ok = false;
+            Value::Null
+        };
+        // The same verdict from the stream reader, 7 bytes at a time.
+        let sok = true;
+        let sv = try parse_stream(b, 7) catch _ {
+            sok = false;
+            Value::Null
+        };
+        if sok != ok || sv != r { bad.push(f"{name} (stream differs)"); }
+        if name.starts_with("y_") {
+            if ok { yes += 1; } else { bad.push(name); }
+        } else if name.starts_with("n_") {
+            if !ok { no += 1; } else { bad.push(name); }
+        } else if ok {
+            i_acc.push(name);
+        } else {
+            i_rej.push(name);
+        }
+    }
+    println(f"y_ accepted: {yes}, n_ rejected: {no}");
+    println(f"i_ accepted ({i_acc.len()}): {i_acc.join(" ")}");
+    println(f"i_ rejected ({i_rej.len()}): {i_rej.join(" ")}");
+    expect(bad.is_empty(), bad.join(", "));
+    expect(yes == 95 && no == 188, "case counts");
+}
+
+#[test]
+fn round_trips() {
+    for (name, b) in suite() {
+        if !name.starts_with("y_") { continue; }
+        let v = try parse_bytes(b) catch e { panic(f"{name}: {e}"); };
+        let compact = v.to_string();
+        let back = try pkg::parse(compact) catch e { panic(f"{name}: {e} in {compact}"); };
+        expect(back == v, f"{name}: compact {compact}");
+        expect(back.to_string() == compact, f"{name}: stable");
+        let pretty = v.to_pretty(4);
+        expect((try pkg::parse(pretty) catch e { panic(f"{name}: {e}"); }) == v, f"{name}: pretty");
+    }
+}
+
+#[test]
+fn numbers() {
+    let cases: List<(str, str)> = [
+        ("0.1", "0.1"), ("1e300", "1e300"), ("5e-324", "5e-324"), ("1.0", "1.0"),
+        ("-0", "-0.0"), ("1E2", "100.0"), ("1e21", "1e21"), ("123456789.125", "123456789.125"),
+        ("0.000001", "0.000001"), ("1e-7", "1e-7"), ("2.2250738585072014e-308", "2.2250738585072014e-308"),
+        ("1.7976931348623157e308", "1.7976931348623157e308"),
+        ("123456789012345678901234567890", "123456789012345678901234567890"), ("-17", "-17"),
+    ];
+    for (src, want) in cases {
+        let v = try pkg::parse(src) catch e { panic(f"{src}: {e}"); };
+        expect(v.to_string() == want, f"{src} -> {v}");
+    }
+    expect((try pkg::parse("12345678901234567890123") catch _ { Value::Null }) == Value::Int(Int::from_literal("12345678901234567890123")), "big int exact");
+    expect((try pkg::parse("1e400") catch e { Value::Str(e.msg) }) == Value::Str("number out of range"), "huge");
+}
+
+#[test]
+fn strings() {
+    let v = try pkg::parse("\"a\\u00e9\\ud83d\\ude00\\n\\\"\\/\\b\\f\\t\\r\\\\\"") catch e { panic(f"{e}"); };
+    expect(v == Value::Str("a\u{e9}\u{1f600}\n\"/\x08\x0C\t\r\\"), f"{v:?}");
+    expect(v.to_string() == "\"a\u{e9}\u{1f600}\\n\\\"/\\b\\f\\t\\r\\\\\"", v.to_string());
+    expect(Value::Str("\x01\x1f").to_string() == "\"\\u0001\\u001f\"", "control");
+}
+
+fn err_of(s: str) -> str {
+    try pkg::parse(s) catch e { return f"{e}"; };
+    "ok"
+}
+
+#[test]
+fn errors() {
+    expect(err_of("{\"a\": 1,\n  \"b\" 2}") == "2:7: expected `:`, found '2'", err_of("{\"a\": 1,\n  \"b\" 2}"));
+    expect(err_of("[1, 2,]") == "1:7: expected a value, found ']'", err_of("[1, 2,]"));
+    expect(err_of("[01]") == "1:2: leading zeros are not allowed", err_of("[01]"));
+    expect(err_of("\"héllo") == "1:1: unterminated string", err_of("\"héllo"));
+    expect(err_of("[\"é\" x]") == "1:6: expected `,` or `]`, found 'x'", err_of("[\"é\" x]"));
+    expect(err_of("") == "1:1: unexpected end of input", err_of(""));
+    expect(err_of("1 2") == "1:3: expected the end of the document, found '2'", err_of("1 2"));
+    expect(err_of("\"\\ud800\"") == "1:2: lone high surrogate in `\\u` escape", err_of("\"\\ud800\""));
+}
+
+#[test]
+fn depth_limit() {
+    let ok = "[".repeat(128) + "]".repeat(128);
+    expect((try pkg::parse(ok) catch _ { Value::Null }) != Value::Null, "128 levels");
+    expect(err_of("[".repeat(129) + "]".repeat(129)) == "1:129: nesting deeper than 128", "129 levels");
+    let t = Tokenizer::new("[[[1]]]");
+    t.max_depth = 2;
+    expect((try pkg::parse_tokens(t) catch e { Value::Str(e.msg) }) == Value::Str("nesting deeper than 2"), "custom limit");
+}
+
+#[test]
+fn events() {
+    let t = Tokenizer::new("{\"a\": [1, 2.5, \"x\", null, true], \"b\": {}}");
+    let got: List<Event> = List::new();
+    loop {
+        let e = try t.next() catch e { panic(f"{e}"); };
+        got.push(e);
+        if e == Event::End { break; }
+    }
+    let want: List<Event> = [
+        Event::BeginObject, Event::Key("a"), Event::BeginArray, Event::Int(Int::from(1)), Event::Float(2.5),
+        Event::Str("x"), Event::Null, Event::Bool(true), Event::EndArray, Event::Key("b"), Event::BeginObject,
+        Event::EndObject, Event::EndObject, Event::End,
+    ];
+    expect(got == want, f"{got:?}");
+}
+
+#[test]
+fn streaming_large() {
+    // ~1 MB through 64 KiB chunks, multi-byte text split at chunk edges.
+    let b = StrBuf::new();
+    b.push_str("[");
+    for i in 0..20000 {
+        if i > 0 { b.push_str(","); }
+        b.push_str(f"{{\"id\":{i},\"name\":\"한글 {i}\",\"x\":{i}.5}}");
+    }
+    b.push_str("]");
+    let s = b.to_str();
+    let bytes: List<u8> = List::new();
+    for x in s.bytes() { bytes.push(x); }
+    let v = try parse_stream(bytes, 65536) catch e { panic(f"{e}"); };
+    expect(v == (try pkg::parse(s) catch e { panic(f"{e}"); }), "same value");
+    expect(v.pointer("/19999/name") == Value::Str("한글 19999"), "last item");
+    let msg = "ok";
+    try parse_stream(hex_bytes("5b310a2c0a7d"), 1) catch e { msg = f"{e}"; };
+    expect(msg == "3:1: expected a value, found '}'", msg);
+}
+
+#[test]
+fn pointer() {
+    // RFC 6901, section 5.
+    let doc = try pkg::parse("{\"foo\": [\"bar\", \"baz\"], \"\": 0, \"a/b\": 1, \"c%d\": 2, \"e^f\": 3, \"g|h\": 4, \"i\\\\j\": 5, \"k\\\"l\": 6, \" \": 7, \"m~n\": 8}") catch e { panic(f"{e}"); };
+    expect(doc.pointer("") == doc, "whole");
+    expect(doc.pointer("/foo") == (try pkg::parse("[\"bar\", \"baz\"]") catch _ { Value::Null }), "/foo");
+    expect(doc.pointer("/foo/0") == Value::Str("bar"), "/foo/0");
+    let ints: List<(str, i32)> = [("/", 0), ("/a~1b", 1), ("/c%d", 2), ("/e^f", 3), ("/g|h", 4), ("/i\\j", 5), ("/k\"l", 6), ("/ ", 7), ("/m~0n", 8)];
+    for (p, n) in ints {
+        expect(doc.pointer(p) == Value::Int(Int::from(n)), p);
+    }
+    expect(doc.pointer("/foo/2") is none, "past the end");
+    expect(doc.pointer("/foo/-") is none, "-");
+    expect(doc.pointer("/foo/01") is none, "leading zero");
+    expect(doc.pointer("foo") is none, "no slash");
+    expect(doc.pointer("/m~2n") is none, "bad escape");
+}
+
+// ---- typed ----
+
+#[derive(Json, Clone, PartialEq, Debug)]
+struct Server {
+    host: str;
+    port: u16 = 80;
+    tls: bool | none;
+}
+
+#[derive(Json, Clone, PartialEq, Debug)]
+enum Shape {
+    Dot,
+    Circle(f64),
+    Pair(i32, i32),
+    Rect { w: f64; h: f64 | none; },
+}
+
+#[derive(Json, Clone, PartialEq, Debug)]
+struct Id(u64);
+
+#[derive(Json, Clone, PartialEq, Debug)]
+struct Config {
+    name: str;
+    servers: List<Server>;
+    limits: OrderedDict<str, i32>;
+    shapes: List<Shape>;
+    ids: Dict<u32, Id>;
+    pair: (str, f32);
+    big: int;
+}
+
+fn config_text() -> str {
+    "{
+  \"name\": \"geom\",
+  \"servers\": [{\"host\": \"a\", \"port\": 8080, \"tls\": true}, {\"host\": \"b\"}],
+  \"limits\": {\"cpu\": 2, \"mem\": 512},
+  \"shapes\": [\"Dot\", {\"Circle\": 1.5}, {\"Pair\": [1, 2]}, {\"Rect\": {\"w\": 2}}],
+  \"ids\": {\"7\": 70},
+  \"pair\": [\"x\", 0.1],
+  \"big\": 123456789012345678901234567890
+}"
+}
+
+#[test]
+fn typed_round_trip() {
+    let c: Config = try pkg::from_str(config_text()) catch e { panic(f"{e}"); };
+    expect(c.servers[0] == Server { host: "a", port: 8080u16, tls: true }, "server 0");
+    expect(c.servers[1] == Server { host: "b", port: 80u16, tls: none }, "defaults");
+    expect(c.limits["mem"] == 512, "limits");
+    expect(c.shapes == [Shape::Dot, Shape::Circle(1.5), Shape::Pair(1, 2), Shape::Rect { w: 2.0, h: none }], f"{c.shapes:?}");
+    expect(c.ids[7u32] == Id(70u64), "int keys");
+    expect(c.pair.1 == 0.1f32, "f32");
+    let text = pkg::to_string(c);
+    expect(text.contains("\"pair\":[\"x\",0.1]"), text);
+    expect(text.contains("\"tls\":null"), text);
+    let back: Config = try pkg::from_str(text) catch e { panic(f"{e}: {text}"); };
+    expect(back == c, "round trip");
+    let pretty: Config = try pkg::from_str(pkg::to_pretty(c)) catch e { panic(f"{e}"); };
+    expect(pretty == c, "pretty round trip");
+}
+
+fn typed_err(s: str) -> str {
+    try pkg::from_str::<Config>(s) catch e { return f"{e} [{e.path}]"; };
+    "ok"
+}
+
+#[test]
+fn typed_errors() {
+    let base = config_text();
+    let e = typed_err(base.replace("8080", "70000"));
+    expect(e == "3:37: integer 70000 is out of range for u16 [/servers/0/port]", e);
+    let e2 = typed_err(base.replace("\"host\": \"b\"", "\"host\": \"b\", \"hots\": 1"));
+    expect(e2 == "3:71: unknown field `hots` in Server [/servers/1/hots]", e2);
+    let e3 = typed_err(base.replace("\"Pair\": [1, 2]", "\"Pair\": [1]"));
+    expect(e3 == "5:47: Shape::Pair takes 2 values, found 1 [/shapes/2/Pair]", e3);
+    let e4 = typed_err(base.replace("\"Dot\"", "\"Square\""));
+    expect(e4 == "5:14: `Square` is not a variant of Shape [/shapes/0]", e4);
+    let e5 = typed_err("{}");
+    expect(e5 == "1:1: missing field `name` in Config []", e5);
+    let e6 = typed_err(base.replace("\"mem\": 512", "\"mem\": \"x\""));
+    expect(e6 == "4:31: expected i32, found string [/limits/mem]", e6);
+}
+
+// ---- benchmarks (`rok bench`): about 4 MB of mixed records ----
+
+fn bench_doc() -> str {
+    let b = StrBuf::new();
+    b.push_str("[");
+    for i in 0..25000 {
+        if i > 0 { b.push_str(",\n"); }
+        b.push_str(f"{{\"id\": {i}, \"name\": \"user {i}\", \"email\": \"user{i}@example.com\", \"score\": {i}.25, ");
+        b.push_str(f"\"ratio\": 0.{i}e-3, \"tags\": [\"a\", \"b\\n\", \"\\u00e9t\\u00e9\"], \"active\": true, \"parent\": null, ");
+        b.push_str("\"text\": \"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor.\"}");
+    }
+    b.push_str("]");
+    b.to_str()
+}
+
+#[bench]
+fn parse_4mb() {
+    let s = bench_doc();
+    let v = try pkg::parse(s) catch e { panic(f"{e}"); };
+    expect(v.at(0) is Value, "parsed");
+}
+
+#[bench]
+fn serialize_4mb() {
+    let v = try pkg::parse(bench_doc()) catch e { panic(f"{e}"); };
+    expect(v.to_string().len() > 0, "written");
+}
+
+#[bench]
+fn build_doc() {
+    expect(bench_doc().len() > 0, "built");
+}
