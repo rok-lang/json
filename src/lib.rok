@@ -276,7 +276,7 @@ fn mismatch<T>(v: Value) -> JsonError {
 /// The pointer segment of member `k`.
 pub fn seg(k: str) -> str { "/" + escape_token(k) }
 
-// ---- derive support (used by `#[derive(Json)]`) ----
+// Used by `#[derive(Json)]`.
 
 /// The members read into a struct or a named variant.
 pub struct Fields {
@@ -485,8 +485,6 @@ pub @derive {
         }
     }
 }
-
-// ---- impls for the standard types ----
 
 impl ToJson for Value {
     fn to_json(self) -> Value { self }

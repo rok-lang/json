@@ -228,8 +228,6 @@ fn pointer() {
     expect(doc.pointer("/m~2n") is none, "bad escape");
 }
 
-// ---- typed ----
-
 #[derive(Json, Clone, PartialEq, Debug)]
 struct Server {
     host: str;
@@ -311,7 +309,7 @@ fn typed_errors() {
     expect(e6 == "4:31: expected i32, found string [/limits/mem]", e6);
 }
 
-// ---- benchmarks (`rok bench`): 6.8 MB of mixed records ----
+// `rok bench`: 6.8 MB of mixed records.
 
 fn bench_doc() -> str {
     let b = StrBuf::new();
