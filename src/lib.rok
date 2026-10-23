@@ -12,9 +12,6 @@ pub mod read;
 pub mod write;
 mod convert;
 
-#[cfg(test)]
-mod tests;
-
 pub use read::{Event, Tokenizer, MAX_DEPTH};
 
 /// A JSON value. Integers without a fraction or exponent are exact

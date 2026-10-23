@@ -310,34 +310,3 @@ fn typed_errors() {
 }
 
 // `rok bench`: 6.8 MB of mixed records.
-
-fn bench_doc() -> str {
-    let b = StrBuf::new();
-    b.push_str("[");
-    for i in 0..25000 {
-        if i > 0 { b.push_str(",\n"); }
-        b.push_str(f"{{\"id\": {i}, \"name\": \"user {i}\", \"email\": \"user{i}@example.com\", \"score\": {i}.25, ");
-        b.push_str(f"\"ratio\": 0.{i}e-3, \"tags\": [\"a\", \"b\\n\", \"\\u00e9t\\u00e9\"], \"active\": true, \"parent\": null, ");
-        b.push_str("\"text\": \"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor.\"}");
-    }
-    b.push_str("]");
-    b.to_str()
-}
-
-#[bench]
-fn parse_records() {
-    let s = bench_doc();
-    let v = try pkg::parse(s) catch e { panic(f"{e}"); };
-    expect(v.at(0) is Value, "parsed");
-}
-
-#[bench]
-fn serialize_records() {
-    let v = try pkg::parse(bench_doc()) catch e { panic(f"{e}"); };
-    expect(v.to_string().len() > 0, "written");
-}
-
-#[bench]
-fn build_doc() {
-    expect(bench_doc().len() > 0, "built");
-}

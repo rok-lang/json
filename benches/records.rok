@@ -1,0 +1,36 @@
+// Parse, serialize and build a large JSON document (spec 9.9.11).
+
+use rok::core::bench::Bench;
+use rok::core::hint::black_box;
+
+// A ~6 MiB array of 25000 record objects.
+fn bench_doc() -> str {
+    let b = StrBuf::new();
+    b.push_str("[");
+    for i in 0..25000 {
+        if i > 0 { b.push_str(",\n"); }
+        b.push_str(f"{{\"id\": {i}, \"name\": \"user {i}\", \"email\": \"user{i}@example.com\", \"score\": {i}.25, ");
+        b.push_str(f"\"ratio\": 0.{i}e-3, \"tags\": [\"a\", \"b\\n\", \"\\u00e9t\\u00e9\"], \"active\": true, \"parent\": null, ");
+        b.push_str("\"text\": \"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor.\"}");
+    }
+    b.push_str("]");
+    b.to_str()
+}
+
+#[bench]
+fn parse_records(b: Bench) {
+    let s = bench_doc();
+    b.bytes(s.len() as i64);
+    b.iter(|| try pkg::parse(black_box(s)) catch e { panic(f"{e}"); });
+}
+
+#[bench]
+fn serialize_records(b: Bench) {
+    let v = try pkg::parse(bench_doc()) catch e { panic(f"{e}"); };
+    b.iter(|| black_box(v).to_string());
+}
+
+#[bench]
+fn build_doc(b: Bench) {
+    b.iter(|| bench_doc());
+}
