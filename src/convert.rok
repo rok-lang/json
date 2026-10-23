@@ -1,0 +1,412 @@
+// ToJson / FromJson for the built-in types and collections. The Value
+// model, the public API and the derive-support helpers are in lib.rok.
+
+use pkg::*;
+
+impl ToJson for Value {
+    fn to_json(self) -> Value { self }
+}
+
+impl FromJson for Value {
+    fn from_json(v: Value) throws (JsonError) -> Value { v }
+}
+
+impl ToJson for bool {
+    fn to_json(self) -> Value { Value::Bool(self) }
+}
+
+impl FromJson for bool {
+    fn from_json(v: Value) throws (JsonError) -> bool {
+        match v {
+            Value::Bool(b) => b,
+            _ => throw mismatch::<bool>(v),
+        }
+    }
+}
+
+impl ToJson for str {
+    fn to_json(self) -> Value { Value::Str(self) }
+}
+
+impl FromJson for str {
+    fn from_json(v: Value) throws (JsonError) -> str {
+        match v {
+            Value::Str(s) => s,
+            _ => throw mismatch::<str>(v),
+        }
+    }
+}
+
+/// A one-character string.
+impl ToJson for char {
+    fn to_json(self) -> Value { Value::Str(f"{self}") }
+}
+
+impl FromJson for char {
+    fn from_json(v: Value) throws (JsonError) -> char {
+        if let s: str = v.as_str() {
+            let cs = s.chars();
+            if let c: char = cs.next() {
+                if cs.next() is none { return c; }
+            }
+        }
+        throw JsonError::new(f"expected char (a one-character string), found {v.kind()}");
+    }
+}
+
+impl ToJson for Int {
+    fn to_json(self) -> Value { Value::Int(self) }
+}
+
+impl FromJson for Int {
+    fn from_json(v: Value) throws (JsonError) -> int { try int_of::<int>(v) }
+}
+
+fn int_of<T>(v: Value) throws (JsonError) -> int {
+    match v {
+        Value::Int(n) => n,
+        _ => throw mismatch::<T>(v),
+    }
+}
+
+fn out_of_range<T>(n: int) -> JsonError {
+    JsonError::new(f"integer {n} is out of range for {T::type_name()}")
+}
+
+impl ToJson for i8 { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
+impl ToJson for i16 { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
+impl ToJson for i32 { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
+impl ToJson for i64 { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
+impl ToJson for isize { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
+impl ToJson for u8 { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
+impl ToJson for u16 { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
+impl ToJson for u32 { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
+impl ToJson for u64 { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
+impl ToJson for usize { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
+impl FromJson for i8 {
+    fn from_json(v: Value) throws (JsonError) -> i8 {
+        let n = try int_of::<i8>(v);
+        try i8::try_from(n) catch _ { throw out_of_range::<i8>(n); }
+    }
+}
+impl FromJson for i16 {
+    fn from_json(v: Value) throws (JsonError) -> i16 {
+        let n = try int_of::<i16>(v);
+        try i16::try_from(n) catch _ { throw out_of_range::<i16>(n); }
+    }
+}
+impl FromJson for i32 {
+    fn from_json(v: Value) throws (JsonError) -> i32 {
+        let n = try int_of::<i32>(v);
+        try i32::try_from(n) catch _ { throw out_of_range::<i32>(n); }
+    }
+}
+impl FromJson for i64 {
+    fn from_json(v: Value) throws (JsonError) -> i64 {
+        let n = try int_of::<i64>(v);
+        try i64::try_from(n) catch _ { throw out_of_range::<i64>(n); }
+    }
+}
+impl FromJson for isize {
+    fn from_json(v: Value) throws (JsonError) -> isize {
+        let n = try int_of::<isize>(v);
+        try isize::try_from(n) catch _ { throw out_of_range::<isize>(n); }
+    }
+}
+impl FromJson for u8 {
+    fn from_json(v: Value) throws (JsonError) -> u8 {
+        let n = try int_of::<u8>(v);
+        try u8::try_from(n) catch _ { throw out_of_range::<u8>(n); }
+    }
+}
+impl FromJson for u16 {
+    fn from_json(v: Value) throws (JsonError) -> u16 {
+        let n = try int_of::<u16>(v);
+        try u16::try_from(n) catch _ { throw out_of_range::<u16>(n); }
+    }
+}
+impl FromJson for u32 {
+    fn from_json(v: Value) throws (JsonError) -> u32 {
+        let n = try int_of::<u32>(v);
+        try u32::try_from(n) catch _ { throw out_of_range::<u32>(n); }
+    }
+}
+impl FromJson for u64 {
+    fn from_json(v: Value) throws (JsonError) -> u64 {
+        let n = try int_of::<u64>(v);
+        try u64::try_from(n) catch _ { throw out_of_range::<u64>(n); }
+    }
+}
+impl FromJson for usize {
+    fn from_json(v: Value) throws (JsonError) -> usize {
+        let n = try int_of::<usize>(v);
+        try usize::try_from(n) catch _ { throw out_of_range::<usize>(n); }
+    }
+}
+
+/// A float target takes an integer too.
+fn f64_of<T>(v: Value) throws (JsonError) -> f64 {
+    match v {
+        Value::Float(x) => x,
+        Value::Int(n) => n.to_f64(),
+        _ => throw mismatch::<T>(v),
+    }
+}
+
+impl ToJson for f64 {
+    fn to_json(self) -> Value { Value::Float(self) }
+}
+
+impl FromJson for f64 {
+    fn from_json(v: Value) throws (JsonError) -> f64 { try f64_of::<f64>(v) }
+}
+
+impl ToJson for f32 {
+    // The shortest `f32` digits (`0.1`, not `0.10000000149011612`).
+    fn to_json(self) -> Value {
+        if !self.is_finite() { return Value::Float(self as f64); }
+        Value::Float(try f"{self:e}".parse::<f64>() catch _ { self as f64 })
+    }
+}
+
+impl FromJson for f32 {
+    fn from_json(v: Value) throws (JsonError) -> f32 { (try f64_of::<f32>(v)) as f32 }
+}
+
+impl ToJson for Float {
+    fn to_json(self) -> Value { Value::Float(self.to_f64()) }
+}
+
+impl FromJson for Float {
+    fn from_json(v: Value) throws (JsonError) -> float { Float::from_f64(try f64_of::<float>(v)) }
+}
+
+impl<T: ToJson> ToJson for T | none {
+    fn to_json(self) -> Value {
+        match self {
+            none => Value::Null,
+            x: T => x.to_json(),
+        }
+    }
+}
+
+impl<T: FromJson> FromJson for T | none {
+    fn from_json(v: Value) throws (JsonError) -> T | none {
+        match v {
+            Value::Null => none,
+            _ => try T::from_json(v),
+        }
+    }
+
+    fn from_missing() throws (JsonError) -> T | none { none }
+}
+
+fn items_of<T>(v: Value) throws (JsonError) -> List<Value> {
+    match v {
+        Value::Array(xs) => xs,
+        _ => throw mismatch::<T>(v),
+    }
+}
+
+impl<T: ToJson> ToJson for List<T> {
+    fn to_json(self) -> Value {
+        let out: List<Value> = List::with_capacity(self.len());
+        for x in self { out.push(x.to_json()); }
+        Value::Array(out)
+    }
+}
+
+impl<T: FromJson> FromJson for List<T> {
+    fn from_json(v: Value) throws (JsonError) -> List<T> {
+        let xs = try items_of::<List<T>>(v);
+        let out: List<T> = List::with_capacity(xs.len());
+        let i = 0usize;
+        for x in xs {
+            out.push(try decode::<T>(x, f"/{i}"));
+            i += 1;
+        }
+        out
+    }
+}
+
+impl<T: ToJson + Hash> ToJson for Set<T> {
+    fn to_json(self) -> Value {
+        let out: List<Value> = List::with_capacity(self.len());
+        for x in self { out.push(x.to_json()); }
+        Value::Array(out)
+    }
+}
+
+impl<T: FromJson + Hash> FromJson for Set<T> {
+    fn from_json(v: Value) throws (JsonError) -> Set<T> {
+        let out: Set<T> = Set::new();
+        for x in try List::<T>::from_json(v) { out.insert(x); }
+        out
+    }
+}
+
+impl<T: ToJson + Hash> ToJson for OrderedSet<T> {
+    fn to_json(self) -> Value {
+        let out: List<Value> = List::with_capacity(self.len());
+        for x in self { out.push(x.to_json()); }
+        Value::Array(out)
+    }
+}
+
+impl<T: FromJson + Hash> FromJson for OrderedSet<T> {
+    fn from_json(v: Value) throws (JsonError) -> OrderedSet<T> {
+        let out: OrderedSet<T> = OrderedSet::new();
+        for x in try List::<T>::from_json(v) { out.insert(x); }
+        out
+    }
+}
+
+impl<T: ToJson, const N: usize> ToJson for [T; N] {
+    fn to_json(self) -> Value {
+        let out: List<Value> = List::with_capacity(N);
+        for i in 0..N { out.push(self[i].to_json()); }
+        Value::Array(out)
+    }
+}
+
+impl<T: FromJson, const N: usize> FromJson for [T; N] {
+    fn from_json(v: Value) throws (JsonError) -> [T; N] {
+        let xs = try List::<T>::from_json(v);
+        if xs.len() != N { throw JsonError::new(f"expected {N} items, found {xs.len()}"); }
+        // The array is seeded with its first item: `[T; 0]` cannot be read.
+        if N == 0 { throw JsonError::new("cannot read a zero-length array"); }
+        let out: [T; N] = [xs[0]; N];
+        for i in 1..N { out[i] = xs[i]; }
+        out
+    }
+
+    fn from_missing() throws (JsonError) -> [T; N] {
+        throw JsonError::new("missing");
+    }
+}
+
+/// An object key for a dict key: a string as is, an integer in decimal.
+fn key_text(k: Value) -> str {
+    match k {
+        Value::Str(s) => s,
+        Value::Int(n) => f"{n}",
+        Value::Bool(b) => if b { "true" } else { "false" },
+        _ => panic(f"a {k.kind()} cannot be a JSON object key"),
+    }
+}
+
+/// Object key `k` as a `K`: as a string, else as the integer it spells.
+fn key_of<K: FromJson>(k: str) throws (JsonError) -> K {
+    try K::from_json(Value::Str(k)) catch e {
+        if let n: int = Int::parse_radix(k, 10u32) {
+            return try K::from_json(Value::Int(n)) catch _ { throw e.within(seg(k)).at_key(); };
+        }
+        throw e.within(seg(k)).at_key();
+    }
+}
+
+fn entries_of<T>(v: Value) throws (JsonError) -> OrderedDict<str, Value> {
+    match v {
+        Value::Object(m) => m,
+        _ => throw mismatch::<T>(v),
+    }
+}
+
+/// Keys are written as `key_text` (strings, integers, bools).
+impl<K: ToJson + Hash, V: ToJson> ToJson for Dict<K, V> {
+    fn to_json(self) -> Value {
+        let out: OrderedDict<str, Value> = OrderedDict::new();
+        for (k, v) in self.entries() { out.insert(key_text(k.to_json()), v.to_json()); }
+        Value::Object(out)
+    }
+}
+
+impl<K: FromJson + Hash, V: FromJson> FromJson for Dict<K, V> {
+    fn from_json(v: Value) throws (JsonError) -> Dict<K, V> {
+        let out: Dict<K, V> = Dict::new();
+        for (k, x) in (try entries_of::<Dict<K, V>>(v)).entries() {
+            out.insert(try key_of::<K>(k), try decode::<V>(x, seg(k)));
+        }
+        out
+    }
+}
+
+impl<K: ToJson + Hash, V: ToJson> ToJson for OrderedDict<K, V> {
+    fn to_json(self) -> Value {
+        let out: OrderedDict<str, Value> = OrderedDict::new();
+        for (k, v) in self.entries() { out.insert(key_text(k.to_json()), v.to_json()); }
+        Value::Object(out)
+    }
+}
+
+impl<K: FromJson + Hash, V: FromJson> FromJson for OrderedDict<K, V> {
+    fn from_json(v: Value) throws (JsonError) -> OrderedDict<K, V> {
+        let out: OrderedDict<K, V> = OrderedDict::new();
+        for (k, x) in (try entries_of::<OrderedDict<K, V>>(v)).entries() {
+            out.insert(try key_of::<K>(k), try decode::<V>(x, seg(k)));
+        }
+        out
+    }
+}
+
+fn tuple_of<T>(v: Value, n: usize) throws (JsonError) -> List<Value> {
+    let xs = try items_of::<T>(v);
+    if xs.len() != n { throw JsonError::new(f"expected {n} items, found {xs.len()}"); }
+    xs
+}
+
+// Tuples as arrays, up to 6 elements.
+impl<A: ToJson> ToJson for (A,) {
+    fn to_json(self) -> Value { Value::Array([self.0.to_json()]) }
+}
+impl<A: FromJson> FromJson for (A,) {
+    fn from_json(v: Value) throws (JsonError) -> (A,) {
+        let xs = try tuple_of::<(A,)>(v, 1);
+        (try decode::<A>(xs[0], "/0"),)
+    }
+}
+impl<A: ToJson, B: ToJson> ToJson for (A, B) {
+    fn to_json(self) -> Value { Value::Array([self.0.to_json(), self.1.to_json()]) }
+}
+impl<A: FromJson, B: FromJson> FromJson for (A, B) {
+    fn from_json(v: Value) throws (JsonError) -> (A, B) {
+        let xs = try tuple_of::<(A, B)>(v, 2);
+        (try decode::<A>(xs[0], "/0"), try decode::<B>(xs[1], "/1"))
+    }
+}
+impl<A: ToJson, B: ToJson, C: ToJson> ToJson for (A, B, C) {
+    fn to_json(self) -> Value { Value::Array([self.0.to_json(), self.1.to_json(), self.2.to_json()]) }
+}
+impl<A: FromJson, B: FromJson, C: FromJson> FromJson for (A, B, C) {
+    fn from_json(v: Value) throws (JsonError) -> (A, B, C) {
+        let xs = try tuple_of::<(A, B, C)>(v, 3);
+        (try decode::<A>(xs[0], "/0"), try decode::<B>(xs[1], "/1"), try decode::<C>(xs[2], "/2"))
+    }
+}
+impl<A: ToJson, B: ToJson, C: ToJson, D: ToJson> ToJson for (A, B, C, D) {
+    fn to_json(self) -> Value { Value::Array([self.0.to_json(), self.1.to_json(), self.2.to_json(), self.3.to_json()]) }
+}
+impl<A: FromJson, B: FromJson, C: FromJson, D: FromJson> FromJson for (A, B, C, D) {
+    fn from_json(v: Value) throws (JsonError) -> (A, B, C, D) {
+        let xs = try tuple_of::<(A, B, C, D)>(v, 4);
+        (try decode::<A>(xs[0], "/0"), try decode::<B>(xs[1], "/1"), try decode::<C>(xs[2], "/2"), try decode::<D>(xs[3], "/3"))
+    }
+}
+impl<A: ToJson, B: ToJson, C: ToJson, D: ToJson, E: ToJson> ToJson for (A, B, C, D, E) {
+    fn to_json(self) -> Value { Value::Array([self.0.to_json(), self.1.to_json(), self.2.to_json(), self.3.to_json(), self.4.to_json()]) }
+}
+impl<A: FromJson, B: FromJson, C: FromJson, D: FromJson, E: FromJson> FromJson for (A, B, C, D, E) {
+    fn from_json(v: Value) throws (JsonError) -> (A, B, C, D, E) {
+        let xs = try tuple_of::<(A, B, C, D, E)>(v, 5);
+        (try decode::<A>(xs[0], "/0"), try decode::<B>(xs[1], "/1"), try decode::<C>(xs[2], "/2"), try decode::<D>(xs[3], "/3"), try decode::<E>(xs[4], "/4"))
+    }
+}
+impl<A: ToJson, B: ToJson, C: ToJson, D: ToJson, E: ToJson, F: ToJson> ToJson for (A, B, C, D, E, F) {
+    fn to_json(self) -> Value { Value::Array([self.0.to_json(), self.1.to_json(), self.2.to_json(), self.3.to_json(), self.4.to_json(), self.5.to_json()]) }
+}
+impl<A: FromJson, B: FromJson, C: FromJson, D: FromJson, E: FromJson, F: FromJson> FromJson for (A, B, C, D, E, F) {
+    fn from_json(v: Value) throws (JsonError) -> (A, B, C, D, E, F) {
+        let xs = try tuple_of::<(A, B, C, D, E, F)>(v, 6);
+        (try decode::<A>(xs[0], "/0"), try decode::<B>(xs[1], "/1"), try decode::<C>(xs[2], "/2"), try decode::<D>(xs[3], "/3"), try decode::<E>(xs[4], "/4"), try decode::<F>(xs[5], "/5"))
+    }
+}
