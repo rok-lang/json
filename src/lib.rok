@@ -149,7 +149,7 @@ impl Display for Value {
     fn fmt(self, ref f: Formatter) throws (FmtError) { try f.write_str(self.to_string()) }
 }
 
-/// `k` as a JSON Pointer reference token (`~` → `~0`, `/` → `~1`).
+/// `k` as a JSON Pointer reference token (`~` -> `~0`, `/` -> `~1`).
 pub fn escape_token(k: str) -> str {
     if !k.contains("~") && !k.contains("/") { return k; }
     k.replace("~", "~0").replace("/", "~1")
@@ -358,8 +358,8 @@ pub fn unknown_variant(v: str, ctx: str) -> JsonError {
 }
 
 /// `#[derive(Json)]`: `ToJson` + `FromJson` for a struct or an enum.
-/// Named struct → object; tuple struct → array (one field: the field
-/// itself); unit struct → `null`. Enum variants are externally tagged:
+/// Named struct -> object; tuple struct -> array (one field: the field
+/// itself); unit struct -> `null`. Enum variants are externally tagged:
 /// unit `"V"`, tuple `{ "V": x }` / `{ "V": [a, b] }`, named
 /// `{ "V": { .. } }`. A missing member takes its default (`f: T = expr`),
 /// else `none` for `T | none`, else is an error.
