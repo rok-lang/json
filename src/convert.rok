@@ -90,7 +90,6 @@ fn out_of_range<T>(n: int) -> JsonError {
     }
 }
 json_int!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
-}
 
 /// A float target takes an integer too.
 fn f64_of<T>(v: Value) throws (JsonError) -> f64 {
