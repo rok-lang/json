@@ -73,75 +73,23 @@ fn out_of_range<T>(n: int) -> JsonError {
     JsonError::new(f"integer {n} is out of range for {T::type_name()}")
 }
 
-impl ToJson for i8 { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
-impl ToJson for i16 { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
-impl ToJson for i32 { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
-impl ToJson for i64 { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
-impl ToJson for isize { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
-impl ToJson for u8 { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
-impl ToJson for u16 { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
-impl ToJson for u32 { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
-impl ToJson for u64 { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
-impl ToJson for usize { fn to_json(self) -> Value { Value::Int(Int::from(self)) } }
-impl FromJson for i8 {
-    fn from_json(v: Value) throws (JsonError) -> i8 {
-        let n = try int_of::<i8>(v);
-        try i8::try_from(n) catch _ { throw out_of_range::<i8>(n); }
+// ToJson / FromJson for every integer type (spec 6.8.12).
+#[impl_macro(json_int)] @macro {
+    (@rep[sep = ","] { @t: ty }) => {
+        @for @t {
+            impl ToJson for @t {
+                fn to_json(self) -> Value { Value::Int(Int::from(self)) }
+            }
+            impl FromJson for @t {
+                fn from_json(v: Value) throws (JsonError) -> @t {
+                    let n = try int_of::<@t>(v);
+                    try @t::try_from(n) catch _ { throw out_of_range::<@t>(n); }
+                }
+            }
+        }
     }
 }
-impl FromJson for i16 {
-    fn from_json(v: Value) throws (JsonError) -> i16 {
-        let n = try int_of::<i16>(v);
-        try i16::try_from(n) catch _ { throw out_of_range::<i16>(n); }
-    }
-}
-impl FromJson for i32 {
-    fn from_json(v: Value) throws (JsonError) -> i32 {
-        let n = try int_of::<i32>(v);
-        try i32::try_from(n) catch _ { throw out_of_range::<i32>(n); }
-    }
-}
-impl FromJson for i64 {
-    fn from_json(v: Value) throws (JsonError) -> i64 {
-        let n = try int_of::<i64>(v);
-        try i64::try_from(n) catch _ { throw out_of_range::<i64>(n); }
-    }
-}
-impl FromJson for isize {
-    fn from_json(v: Value) throws (JsonError) -> isize {
-        let n = try int_of::<isize>(v);
-        try isize::try_from(n) catch _ { throw out_of_range::<isize>(n); }
-    }
-}
-impl FromJson for u8 {
-    fn from_json(v: Value) throws (JsonError) -> u8 {
-        let n = try int_of::<u8>(v);
-        try u8::try_from(n) catch _ { throw out_of_range::<u8>(n); }
-    }
-}
-impl FromJson for u16 {
-    fn from_json(v: Value) throws (JsonError) -> u16 {
-        let n = try int_of::<u16>(v);
-        try u16::try_from(n) catch _ { throw out_of_range::<u16>(n); }
-    }
-}
-impl FromJson for u32 {
-    fn from_json(v: Value) throws (JsonError) -> u32 {
-        let n = try int_of::<u32>(v);
-        try u32::try_from(n) catch _ { throw out_of_range::<u32>(n); }
-    }
-}
-impl FromJson for u64 {
-    fn from_json(v: Value) throws (JsonError) -> u64 {
-        let n = try int_of::<u64>(v);
-        try u64::try_from(n) catch _ { throw out_of_range::<u64>(n); }
-    }
-}
-impl FromJson for usize {
-    fn from_json(v: Value) throws (JsonError) -> usize {
-        let n = try int_of::<usize>(v);
-        try usize::try_from(n) catch _ { throw out_of_range::<usize>(n); }
-    }
+json_int!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
 }
 
 /// A float target takes an integer too.
