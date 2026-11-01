@@ -5,5 +5,7 @@ Package {
     description: "JSON (RFC 8259): Value tree, strict parser, streaming tokenizer, typed encode/decode, JSON Pointer",
     license: "MIT OR Apache-2.0",
     repository: "https://github.com/rok-lang/json",
+    keywords: ["json", "parser", "serialization", "encoding"],
+    categories: ["encoding", "parser-implementations"],
     deps: {},
 }
