@@ -2,7 +2,7 @@
 // (all of it for a `str`, chunks for a reader) and yields `Event`s,
 // checking the grammar as it goes; `parse` builds a `Value` from them.
 
-use rok::std::io::{Reader, IoError};
+use rok::core::io::IoError;
 use pkg::{Value, JsonError};
 
 /// One step of a document, in order. Every `BeginObject` / `BeginArray`
@@ -42,7 +42,7 @@ const QUOTE: u8 = 0x22u8;
 const BSLASH: u8 = 0x5Cu8;
 
 /// A JSON reader yielding `Event`s. `new` reads a string; `from_reader`
-/// reads any `io::Reader` in 64 KiB chunks and keeps only the unread part
+/// reads any `io::Read` in 64 KiB chunks and keeps only the unread part
 /// of the current chunk, so memory stays flat for large inputs.
 pub struct Tokenizer {
     /// Nesting limit; deeper input is an error.
@@ -50,7 +50,7 @@ pub struct Tokenizer {
     src: str;
     i: usize;
     eof: bool;
-    fill: fn(List<u8>) throws (IoError) -> usize;
+    fill: fn(SliceMut<u8>) throws (IoError) -> usize;
     /// An incomplete UTF-8 sequence at the end of the last chunk.
     tail: List<u8>;
     /// The read buffer (empty until the first read).
@@ -72,11 +72,11 @@ impl Tokenizer {
     }
 
     /// Read `r` to its end.
-    pub fn from_reader<R: Reader>(r: R) -> Tokenizer {
+    pub fn from_reader<R: Read>(r: R) -> Tokenizer {
         Tokenizer::make("", false, [ref r] |b| try r.read(b))
     }
 
-    fn make(s: str, eof: bool, fill: fn(List<u8>) throws (IoError) -> usize) -> Tokenizer {
+    fn make(s: str, eof: bool, fill: fn(SliceMut<u8>) throws (IoError) -> usize) -> Tokenizer {
         Tokenizer {
             max_depth: MAX_DEPTH, src: s, i: 0, eof: eof, fill: fill, tail: List::new(), buf: List::new(),
             line: 1u32, col: 1u32, stack: List::new(), expect: E_VALUE, at: 0,
@@ -451,7 +451,7 @@ fn value(ref t: Tokenizer, e: Event) throws (JsonError) -> Value {
             Value::Array(xs)
         },
         Event::BeginObject => {
-            let m: OrderedDict<str, Value> = OrderedDict::new();
+            let m: Dict<str, Value> = Dict::new();
             loop {
                 match try t.next() {
                     Event::Key(k) => {

@@ -192,22 +192,6 @@ impl<T: FromJson + Hash> FromJson for Set<T> {
     }
 }
 
-impl<T: ToJson + Hash> ToJson for OrderedSet<T> {
-    fn to_json(self) -> Value {
-        let out: List<Value> = List::with_capacity(self.len());
-        for x in self { out.push(x.to_json()); }
-        Value::Array(out)
-    }
-}
-
-impl<T: FromJson + Hash> FromJson for OrderedSet<T> {
-    fn from_json(v: Value) throws (JsonError) -> OrderedSet<T> {
-        let out: OrderedSet<T> = OrderedSet::new();
-        for x in try List::<T>::from_json(v) { out.insert(x); }
-        out
-    }
-}
-
 impl<T: ToJson, const N: usize> ToJson for [T; N] {
     fn to_json(self) -> Value {
         let out: List<Value> = List::with_capacity(N);
@@ -245,14 +229,14 @@ fn key_text(k: Value) -> str {
 /// Object key `k` as a `K`: as a string, else as the integer it spells.
 fn key_of<K: FromJson>(k: str) throws (JsonError) -> K {
     try K::from_json(Value::Str(k)) catch e {
-        if let n: int = Int::parse_radix(k, 10u32) {
+        if let n: int = try? Int::parse_radix(k, 10u32) {
             return try K::from_json(Value::Int(n)) catch _ { throw e.within(seg(k)).at_key(); };
         }
         throw e.within(seg(k)).at_key();
     }
 }
 
-fn entries_of<T>(v: Value) throws (JsonError) -> OrderedDict<str, Value> {
+fn entries_of<T>(v: Value) throws (JsonError) -> Dict<str, Value> {
     match v {
         Value::Object(m) => m,
         _ => throw mismatch::<T>(v),
@@ -262,8 +246,8 @@ fn entries_of<T>(v: Value) throws (JsonError) -> OrderedDict<str, Value> {
 /// Keys are written as `key_text` (strings, integers, bools).
 impl<K: ToJson + Hash, V: ToJson> ToJson for Dict<K, V> {
     fn to_json(self) -> Value {
-        let out: OrderedDict<str, Value> = OrderedDict::new();
-        for (k, v) in self.entries() { out.insert(key_text(k.to_json()), v.to_json()); }
+        let out: Dict<str, Value> = Dict::new();
+        for (k, v) in self.iter() { out.insert(key_text(k.to_json()), v.to_json()); }
         Value::Object(out)
     }
 }
@@ -271,25 +255,7 @@ impl<K: ToJson + Hash, V: ToJson> ToJson for Dict<K, V> {
 impl<K: FromJson + Hash, V: FromJson> FromJson for Dict<K, V> {
     fn from_json(v: Value) throws (JsonError) -> Dict<K, V> {
         let out: Dict<K, V> = Dict::new();
-        for (k, x) in (try entries_of::<Dict<K, V>>(v)).entries() {
-            out.insert(try key_of::<K>(k), try decode::<V>(x, seg(k)));
-        }
-        out
-    }
-}
-
-impl<K: ToJson + Hash, V: ToJson> ToJson for OrderedDict<K, V> {
-    fn to_json(self) -> Value {
-        let out: OrderedDict<str, Value> = OrderedDict::new();
-        for (k, v) in self.entries() { out.insert(key_text(k.to_json()), v.to_json()); }
-        Value::Object(out)
-    }
-}
-
-impl<K: FromJson + Hash, V: FromJson> FromJson for OrderedDict<K, V> {
-    fn from_json(v: Value) throws (JsonError) -> OrderedDict<K, V> {
-        let out: OrderedDict<K, V> = OrderedDict::new();
-        for (k, x) in (try entries_of::<OrderedDict<K, V>>(v)).entries() {
+        for (k, x) in (try entries_of::<Dict<K, V>>(v)).iter() {
             out.insert(try key_of::<K>(k), try decode::<V>(x, seg(k)));
         }
         out

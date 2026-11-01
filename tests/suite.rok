@@ -2,7 +2,7 @@
 // JSON Pointer, typed decode / encode.
 
 use rok::std::fs;
-use rok::std::io::{Reader, IoError};
+use rok::core::io::IoError;
 use pkg::{Value, JsonError, Event, Tokenizer};
 
 fn expect(ok: bool, what: str) {
@@ -13,7 +13,7 @@ fn hex_bytes(h: str) -> List<u8> {
     let out: List<u8> = List::with_capacity(h.len() / 2);
     let i = 0usize;
     while i + 1 < h.len() {
-        let n = Int::parse_radix(h[i:i + 2], 16u32) ?? Int::from(0);
+        let n = (try? Int::parse_radix(h[i:i + 2], 16u32)) ?? Int::from(0);
         out.push((n.to_i64() ?? 0) as u8);
         i += 2;
     }
@@ -48,8 +48,8 @@ struct Chunks {
     step: usize;
 }
 
-impl Reader for Chunks {
-    fn read(ref self, buf: List<u8>) throws (IoError) -> usize {
+impl Read for Chunks {
+    fn read(ref self, buf: SliceMut<u8>) throws (IoError) -> usize {
         let n = 0usize;
         while n < self.step && n < buf.len() && self.at < self.data.len() {
             buf[n] = self.data[self.at];
@@ -250,7 +250,7 @@ struct Id(u64);
 struct Config {
     name: str;
     servers: List<Server>;
-    limits: OrderedDict<str, i32>;
+    limits: Dict<str, i32>;
     shapes: List<Shape>;
     ids: Dict<u32, Id>;
     pair: (str, f32);

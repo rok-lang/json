@@ -25,7 +25,7 @@ pub enum Value {
     Float(f64),
     Str(str),
     Array(List<Value>),
-    Object(OrderedDict<str, Value>),
+    Object(Dict<str, Value>),
 }
 
 impl Value {
@@ -135,7 +135,7 @@ impl Value {
         }
     }
 
-    pub fn as_object(self) -> OrderedDict<str, Value> | none {
+    pub fn as_object(self) -> Dict<str, Value> | none {
         match self {
             Value::Object(m) => m,
             _ => none,
@@ -278,7 +278,7 @@ pub fn seg(k: str) -> str { "/" + escape_token(k) }
 
 /// The members read into a struct or a named variant.
 pub struct Fields {
-    vals: OrderedDict<str, Value>;
+    vals: Dict<str, Value>;
     ctx: str;
 }
 
@@ -289,7 +289,7 @@ impl Fields {
             Value::Object(m) => m,
             _ => throw JsonError::new(f"expected {ctx} (an object), found {v.kind()}"),
         };
-        for (k, _) in m.entries() {
+        for (k, _) in m.iter() {
             if !names.iter().any(|n| n == k) {
                 throw JsonError::new(f"unknown field `{k}` in {ctx}").within(seg(k)).at_key();
             }
@@ -329,7 +329,7 @@ pub fn variant_of(v: Value, ctx: str) throws (JsonError) -> (str, Value | none) 
         Value::Str(s) => (s, none),
         Value::Object(m) => {
             if m.len() != 1 { throw JsonError::new(f"expected a {ctx} variant (an object with one key), found {m.len()} keys"); }
-            let (k, x) = m.entries().next() ?? ("", Value::Null);
+            let (k, x) = m.iter().next() ?? ("", Value::Null);
             (k, x)
         },
         _ => throw JsonError::new(f"expected a {ctx} variant, found {v.kind()}"),
@@ -374,7 +374,7 @@ pub @derive {
                     return pkg::Value::Null;
                 }
                 @apply_if(@Self.is_named) {
-                    let m: OrderedDict<str, pkg::Value> = OrderedDict::new();
+                    let m: Dict<str, pkg::Value> = Dict::new();
                     @for_fields {
                         m.insert(@field.name.as_str(), pkg::encode::<@field.type>(self.@field));
                     }
@@ -389,16 +389,16 @@ pub @derive {
                                 pkg::Value::Str(@variant.name.as_str())
                             }
                             @apply_if(@variant.is_tuple) {
-                                let m: OrderedDict<str, pkg::Value> = OrderedDict::new();
+                                let m: Dict<str, pkg::Value> = Dict::new();
                                 m.insert(@variant.name.as_str(), pkg::pack([@for_variant_fields { pkg::encode::<@field.type>(@field), }]));
                                 pkg::Value::Object(m)
                             }
                             @apply_if(@variant.is_named) {
-                                let fs: OrderedDict<str, pkg::Value> = OrderedDict::new();
+                                let fs: Dict<str, pkg::Value> = Dict::new();
                                 @for_variant_fields {
                                     fs.insert(@field.name.as_str(), pkg::encode::<@field.type>(@field));
                                 }
-                                let m: OrderedDict<str, pkg::Value> = OrderedDict::new();
+                                let m: Dict<str, pkg::Value> = Dict::new();
                                 m.insert(@variant.name.as_str(), pkg::Value::Object(fs));
                                 pkg::Value::Object(m)
                             }
