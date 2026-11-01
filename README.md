@@ -2,9 +2,9 @@
 
 JSON ([RFC 8259](https://www.rfc-editor.org/rfc/rfc8259)) for Rok: a `Value`
 tree, a strict parser with `line:col` errors, compact and indented writers, a
-streaming tokenizer for large inputs, typed encode / decode with
+streaming tokenizer for large inputs, typed conversion with
 `#[derive(Json)]`, and JSON Pointer. The API follows std's `rokon` module:
-`parse` / `to_str` / `from_str` / `encode` / `decode`, with `ToJson` /
+`parse` / `to_str` / `from_str` / `to_value` / `from_value`, with `ToJson` /
 `FromJson` traits.
 
 ## Add it

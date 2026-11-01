@@ -134,7 +134,7 @@ fn numbers() {
         let v = try pkg::parse(src) catch e { panic(f"{src}: {e}"); };
         expect(v.to_str() == want, f"{src} -> {v}");
     }
-    expect((try pkg::parse("12345678901234567890123") catch _ { Value::Null }) == Value::Int(Int::from_literal("12345678901234567890123")), "big int exact");
+    expect((try pkg::parse("12345678901234567890123") catch _ { Value::Null }) == Value::Int(12345678901234567890123), "big int exact");
     expect((try pkg::parse("1e400") catch e { Value::Str(e.message()) }) == Value::Str("number out of range"), "huge");
 }
 

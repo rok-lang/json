@@ -239,7 +239,7 @@ impl Tokenizer {
         self.i = j;
         if !is_float {
             if text == "-0" { return Event::Float(-0.0); }
-            if j - int_start > 18 { return Event::Int(Int::from_literal(text)); }
+            if j - int_start > 18 { return Event::Int(try text.parse::<Int>() catch e { throw self.fail(at, e.message()); }); }
             // Fits an i64: skip the general (BigInt) path.
             let v = 0i64;
             for k in int_start..j { v = v * 10 + (s.byte(k) - 0x30u8) as i64; }
