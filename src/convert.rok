@@ -247,7 +247,7 @@ fn entries_of<T>(v: Value) throws (JsonError) -> Dict<str, Value> {
 impl<K: ToJson + Hash, V: ToJson> ToJson for Dict<K, V> {
     fn to_json(self) -> Value {
         let out: Dict<str, Value> = Dict::new();
-        for (k, v) in self.iter() { out.insert(key_text(k.to_json()), v.to_json()); }
+        for (k, v) in self { out.insert(key_text(k.to_json()), v.to_json()); }
         Value::Object(out)
     }
 }
@@ -255,7 +255,7 @@ impl<K: ToJson + Hash, V: ToJson> ToJson for Dict<K, V> {
 impl<K: FromJson + Hash, V: FromJson> FromJson for Dict<K, V> {
     fn from_json(v: Value) throws (JsonError) -> Dict<K, V> {
         let out: Dict<K, V> = Dict::new();
-        for (k, x) in (try entries_of::<Dict<K, V>>(v)).iter() {
+        for (k, x) in try entries_of::<Dict<K, V>>(v) {
             out.insert(try key_of::<K>(k), try decode::<V>(x, seg(k)));
         }
         out

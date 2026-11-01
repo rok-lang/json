@@ -2,6 +2,7 @@
 // (all of it for a `str`, chunks for a reader) and yields `Event`s,
 // checking the grammar as it goes; `parse` builds a `Value` from them.
 
+use rok::core::collections::SliceMut;
 use rok::core::io::IoError;
 use pkg::{Value, JsonError};
 
@@ -163,13 +164,13 @@ impl Tokenizer {
             } else if b == 0x2Du8 || (b >= 0x30u8 && b <= 0x39u8) {
                 try self.number(at)?
             } else if b == 0x74u8 {
-                try self.word(at, "true")?;
+                _ = try self.word(at, "true")?;
                 Event::Bool(true)
             } else if b == 0x66u8 {
-                try self.word(at, "false")?;
+                _ = try self.word(at, "false")?;
                 Event::Bool(false)
             } else if b == 0x6Eu8 {
-                try self.word(at, "null")?;
+                _ = try self.word(at, "null")?;
                 Event::Null
             } else {
                 throw self.found(at, "a value");
@@ -244,7 +245,7 @@ impl Tokenizer {
             for k in int_start..j { v = v * 10 + (s.byte(k) - 0x30u8) as i64; }
             return Event::Int(Int::from_i64(if int_start > at { -v } else { v }));
         }
-        Event::Float(try text.parse::<f64>() catch e { throw self.fail(at, e.reason); })
+        Event::Float(try text.parse::<f64>() catch e { throw self.fail(at, e.message()); })
     }
 
     /// The string starting with the `"` at `at`.
@@ -430,7 +431,7 @@ fn simple_escape(e: u8) -> char | none {
 pub fn parse_with(t: Tokenizer) throws (JsonError) -> Value {
     let e = try t.next();
     let v = try value(ref t, e);
-    try t.next();
+    _ = try t.next();
     v
 }
 

@@ -34,7 +34,7 @@ pub fn value(out: StrBuf, v: Value, indent: usize, level: usize) {
             }
             out.push('{');
             let first = true;
-            for (k, x) in m.iter() {
+            for (k, x) in m {
                 if !first { out.push(','); }
                 first = false;
                 newline(out, indent, level + 1);

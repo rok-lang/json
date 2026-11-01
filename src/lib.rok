@@ -1,4 +1,4 @@
-// JSON (RFC 8259). `parse` reads a document into a `Value`, `to_string`
+// JSON (RFC 8259). `parse` reads a document into a `Value`, `to_str`
 // / `to_pretty` write one, and `ToJson` / `FromJson` (with
 // `#[derive(Json)]`) map rok types to and from `Value`, as std's
 // `rokon` does for ROKON. `Tokenizer` reads large inputs as a stream of
@@ -30,14 +30,14 @@ pub enum Value {
 
 impl Value {
     /// Compact text. Panics on a NaN / infinite float.
-    pub fn to_string(self) -> str {
+    pub fn to_str(self) -> str {
         let out = StrBuf::new();
         write::value(out, self, 0, 0);
         out.to_str()
     }
 
     /// Text with each member on its own line, `indent` spaces per level
-    /// (`0` is `to_string`).
+    /// (`0` is `to_str`).
     pub fn to_pretty(self, indent: usize) -> str {
         let out = StrBuf::new();
         write::value(out, self, indent, 0);
@@ -144,7 +144,7 @@ impl Value {
 }
 
 impl Display for Value {
-    fn fmt(self, ref f: Formatter) throws (FmtError) { try f.write_str(self.to_string()) }
+    fn fmt(self, ref f: Formatter) throws (FmtError) { try f.write_str(self.to_str()) }
 }
 
 /// `k` as a JSON Pointer reference token (`~` -> `~0`, `/` -> `~1`).
@@ -176,10 +176,10 @@ fn unescape_token(t: str) -> str | none {
 /// when the value did not come from text; `path` is a JSON Pointer to the
 /// failing part (`/servers/2/port`, empty at the root).
 pub struct JsonError {
-    pub msg: str;
-    pub line: u32;
-    pub col: u32;
-    pub path: str;
+    pub(pkg) msg: str;
+    pub(pkg) line: u32;
+    pub(pkg) col: u32;
+    pub(pkg) path: str;
     /// The error is about an object key, not its value (`from_str`
     /// points at the key).
     pub(pkg) on_key: bool;
@@ -194,6 +194,15 @@ impl JsonError {
     pub fn within(self, seg: str) -> JsonError {
         JsonError { msg: self.msg, line: self.line, col: self.col, path: seg + self.path, on_key: self.on_key }
     }
+
+    /// What went wrong, without the position.
+    pub fn message(self) -> str { self.msg }
+    /// 1-based line, 0 when the value did not come from text.
+    pub fn line(self) -> u32 { self.line }
+    /// 1-based column in code points, 0 when the value did not come from text.
+    pub fn col(self) -> u32 { self.col }
+    /// JSON Pointer to the failing part, empty at the root.
+    pub fn path(self) -> str { self.path }
 
     pub(pkg) fn at_key(self) -> JsonError {
         JsonError { msg: self.msg, line: self.line, col: self.col, path: self.path, on_key: true }
@@ -247,7 +256,7 @@ pub fn parse_tokens(t: Tokenizer) throws (JsonError) -> Value {
 }
 
 /// `x` as compact JSON. Panics on a NaN / infinite float.
-pub fn to_string<T: ToJson>(x: T) -> str { x.to_json().to_string() }
+pub fn to_str<T: ToJson>(x: T) -> str { x.to_json().to_str() }
 
 /// `x` as JSON indented by 2 spaces.
 pub fn to_pretty<T: ToJson>(x: T) -> str { x.to_json().to_pretty(2) }
@@ -289,7 +298,7 @@ impl Fields {
             Value::Object(m) => m,
             _ => throw JsonError::new(f"expected {ctx} (an object), found {v.kind()}"),
         };
-        for (k, _) in m.iter() {
+        for (k, _) in m {
             if !names.iter().any(|n| n == k) {
                 throw JsonError::new(f"unknown field `{k}` in {ctx}").within(seg(k)).at_key();
             }
@@ -329,7 +338,7 @@ pub fn variant_of(v: Value, ctx: str) throws (JsonError) -> (str, Value | none) 
         Value::Str(s) => (s, none),
         Value::Object(m) => {
             if m.len() != 1 { throw JsonError::new(f"expected a {ctx} variant (an object with one key), found {m.len()} keys"); }
-            let (k, x) = m.iter().next() ?? ("", Value::Null);
+            let (k, x) = m.into_iter().next() ?? ("", Value::Null);
             (k, x)
         },
         _ => throw JsonError::new(f"expected a {ctx} variant, found {v.kind()}"),
