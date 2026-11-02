@@ -73,7 +73,7 @@ fn out_of_range<T>(n: int) -> JsonError {
     JsonError::new(f"integer {n} is out of range for {T::type_name()}")
 }
 
-// ToJson / FromJson for every integer type (spec 6.8.12).
+// ToJson / FromJson for every integer type.
 #[impl_macro(json_int)] @macro {
     (@rep[sep = ","] { @t: ty }) => {
         @for @t {
