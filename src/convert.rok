@@ -1,5 +1,4 @@
-// ToJson / FromJson for the built-in types and collections. The Value
-// model, the public API and the derive-support helpers are in lib.rok.
+// ToJson / FromJson for the built-in types and collections.
 
 use pkg::*;
 

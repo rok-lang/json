@@ -288,9 +288,8 @@ pub(pkg) fn mismatch<T>(v: Value) -> JsonError {
 /// The pointer segment of member `k`.
 pub(pkg) fn seg(k: str) -> str { "/" + escape_token(k) }
 
-// derive support (used by `#[derive(Json)]`): the template's names
-// are checked here, so these are `pub(pkg)`. The `dead_code` lint does
-// not see uses inside the template, hence the `allow`s.
+// Derive support. The template's names resolve here, so these are
+// `pub(pkg)`; `dead_code` misses uses inside the template.
 
 /// The members read into a struct or a named variant.
 pub(pkg) struct Fields {
@@ -343,7 +342,7 @@ pub(pkg) fn unpack(v: Value, ctx: str, n: usize) throws (JsonError) -> List<Valu
 }
 
 /// `v` as a variant of enum `ctx`: `"V"` for a unit variant, else
-/// `{ "V": payload }`. (variant name, payload or `none`).
+/// `{ "V": payload }`. Yields (variant name, payload or `none`).
 #[allow(dead_code)]
 pub(pkg) fn variant_of(v: Value, ctx: str) throws (JsonError) -> (str, Value | none) {
     match v {

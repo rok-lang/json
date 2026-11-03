@@ -213,7 +213,7 @@ fn streaming_large() {
 
 #[test]
 fn pointer() {
-    // RFC 6901, section 5.
+    // The RFC 6901 examples.
     let doc = try pkg::parse("{\"foo\": [\"bar\", \"baz\"], \"\": 0, \"a/b\": 1, \"c%d\": 2, \"e^f\": 3, \"g|h\": 4, \"i\\\\j\": 5, \"k\\\"l\": 6, \" \": 7, \"m~n\": 8}") catch e { panic(f"{e}"); };
     expect(doc.pointer("") == doc, "whole");
     expect(doc.pointer("/foo") == (try pkg::parse("[\"bar\", \"baz\"]") catch _ { Value::Null }), "/foo");
