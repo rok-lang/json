@@ -309,5 +309,3 @@ fn typed_errors() {
     let e6 = typed_err(base.replace("\"mem\": 512", "\"mem\": \"x\""));
     expect(e6 == "4:31: expected i32, found string [/limits/mem]", e6);
 }
-
-// `rok bench`: 6.8 MB of mixed records.

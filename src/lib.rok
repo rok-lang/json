@@ -1,6 +1,6 @@
 // JSON (RFC 8259). `parse` reads a document into a `Value`, `to_str`
 // / `to_pretty` write one, and `ToJson` / `FromJson` (with
-// `#[derive(Json)]`) map rok types to and from `Value`, as std's
+// `#[derive(Json)]`) map Rok types to and from `Value`, as std's
 // `rokon` does for ROKON. `Tokenizer` reads large inputs as a stream of
 // `Event`s.
 //
@@ -228,12 +228,12 @@ impl Debug for JsonError {
 
 impl Error for JsonError {}
 
-/// A rok value as JSON.
+/// A Rok value as JSON.
 pub trait ToJson {
     fn to_json(self) -> Value;
 }
 
-/// A rok value from JSON; the target type decides how `v` reads.
+/// A Rok value from JSON; the target type decides how `v` reads.
 pub trait FromJson {
     fn from_json(v: Value) throws (JsonError) -> Self;
 
