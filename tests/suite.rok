@@ -309,3 +309,22 @@ fn typed_errors() {
     let e6 = typed_err(base.replace("\"mem\": 512", "\"mem\": \"x\""));
     expect(e6 == "4:31: expected i32, found string [/limits/mem]", e6);
 }
+
+// Not Clone: each slot takes its own item.
+#[derive(Json, PartialEq, Debug)]
+struct Pt { x: i64; y: i64; }
+
+fn arr_err(s: str) -> str {
+    try pkg::from_str::<[i64; 2]>(s) catch e { return f"{e}"; };
+    "ok"
+}
+
+#[test]
+fn fixed_arrays() {
+    let a: [Pt; 2] = try pkg::from_str("[{\"x\": 1, \"y\": 2}, {\"x\": 3, \"y\": 4}]") catch e { panic(f"{e}"); };
+    expect(a[0] == Pt { x: 1, y: 2 } && a[1] == Pt { x: 3, y: 4 }, f"{a:?}");
+    let e: [i64; 0] = try pkg::from_str("[]") catch e { panic(f"{e}"); };
+    expect(e.len() == 0, "empty");
+    let n = arr_err("[1]");
+    expect(n.contains("expected 2 items, found 1"), n);
+}

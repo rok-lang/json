@@ -204,11 +204,12 @@ impl<T: FromJson, const N: usize> FromJson for [T; N] {
     fn from_json(v: Value) throws (JsonError) -> [T; N] {
         let xs = try List::<T>::from_json(v);
         if xs.len() != N { throw JsonError::new(f"expected {N} items, found {xs.len()}"); }
-        // The array is seeded with its first item: `[T; 0]` cannot be read.
-        if N == 0 { throw JsonError::new("cannot read a zero-length array"); }
-        let out: [T; N] = [xs[0]; N];
-        for i in 1..N { out[i] = xs[i]; }
-        out
+        // Each slot takes the next item: no element is copied.
+        let i = 0;
+        [(); N].map([ref i] |_| {
+            i += 1;
+            xs[i - 1]
+        })
     }
 
     fn from_missing() throws (JsonError) -> [T; N] {
