@@ -2,7 +2,8 @@
 // JSON Pointer, typed decode / encode.
 
 use rok::std::fs;
-use rok::std::io::{Reader, IoError};
+use rok::core::collections::SliceMut;
+use rok::core::io::IoError;
 use pkg::{Value, JsonError, Event, Tokenizer};
 
 fn expect(ok: bool, what: str) {
@@ -13,7 +14,7 @@ fn hex_bytes(h: str) -> List<u8> {
     let out: List<u8> = List::with_capacity(h.len() / 2);
     let i = 0usize;
     while i + 1 < h.len() {
-        let n = Int::parse_radix(h[i:i + 2], 16u32) ?? Int::from(0);
+        let n = (try? Int::parse_radix(h[i:i + 2], 16u32)) ?? Int::from(0);
         out.push((n.to_i64() ?? 0) as u8);
         i += 2;
     }
@@ -48,8 +49,8 @@ struct Chunks {
     step: usize;
 }
 
-impl Reader for Chunks {
-    fn read(ref self, buf: List<u8>) throws (IoError) -> usize {
+impl Read for Chunks {
+    fn read(ref self, buf: SliceMut<u8>) throws (IoError) -> usize {
         let n = 0usize;
         while n < self.step && n < buf.len() && self.at < self.data.len() {
             buf[n] = self.data[self.at];
@@ -111,10 +112,10 @@ fn round_trips() {
     for (name, b) in suite() {
         if !name.starts_with("y_") { continue; }
         let v = try parse_bytes(b) catch e { panic(f"{name}: {e}"); };
-        let compact = v.to_string();
+        let compact = v.to_str();
         let back = try pkg::parse(compact) catch e { panic(f"{name}: {e} in {compact}"); };
         expect(back == v, f"{name}: compact {compact}");
-        expect(back.to_string() == compact, f"{name}: stable");
+        expect(back.to_str() == compact, f"{name}: stable");
         let pretty = v.to_pretty(4);
         expect((try pkg::parse(pretty) catch e { panic(f"{name}: {e}"); }) == v, f"{name}: pretty");
     }
@@ -131,18 +132,18 @@ fn numbers() {
     ];
     for (src, want) in cases {
         let v = try pkg::parse(src) catch e { panic(f"{src}: {e}"); };
-        expect(v.to_string() == want, f"{src} -> {v}");
+        expect(v.to_str() == want, f"{src} -> {v}");
     }
-    expect((try pkg::parse("12345678901234567890123") catch _ { Value::Null }) == Value::Int(Int::from_literal("12345678901234567890123")), "big int exact");
-    expect((try pkg::parse("1e400") catch e { Value::Str(e.msg) }) == Value::Str("number out of range"), "huge");
+    expect((try pkg::parse("12345678901234567890123") catch _ { Value::Null }) == Value::Int(12345678901234567890123), "big int exact");
+    expect((try pkg::parse("1e400") catch e { Value::Str(e.message()) }) == Value::Str("number out of range"), "huge");
 }
 
 #[test]
 fn strings() {
     let v = try pkg::parse("\"a\\u00e9\\ud83d\\ude00\\n\\\"\\/\\b\\f\\t\\r\\\\\"") catch e { panic(f"{e}"); };
     expect(v == Value::Str("a\u{e9}\u{1f600}\n\"/\x08\x0C\t\r\\"), f"{v:?}");
-    expect(v.to_string() == "\"a\u{e9}\u{1f600}\\n\\\"/\\b\\f\\t\\r\\\\\"", v.to_string());
-    expect(Value::Str("\x01\x1f").to_string() == "\"\\u0001\\u001f\"", "control");
+    expect(v.to_str() == "\"a\u{e9}\u{1f600}\\n\\\"/\\b\\f\\t\\r\\\\\"", v.to_str());
+    expect(Value::Str("\x01\x1f").to_str() == "\"\\u0001\\u001f\"", "control");
 }
 
 fn err_of(s: str) -> str {
@@ -169,7 +170,7 @@ fn depth_limit() {
     expect(err_of("[".repeat(129) + "]".repeat(129)) == "1:129: nesting deeper than 128", "129 levels");
     let t = Tokenizer::new("[[[1]]]");
     t.max_depth = 2;
-    expect((try pkg::parse_tokens(t) catch e { Value::Str(e.msg) }) == Value::Str("nesting deeper than 2"), "custom limit");
+    expect((try pkg::parse_tokens(t) catch e { Value::Str(e.message()) }) == Value::Str("nesting deeper than 2"), "custom limit");
 }
 
 #[test]
@@ -212,7 +213,7 @@ fn streaming_large() {
 
 #[test]
 fn pointer() {
-    // RFC 6901, section 5.
+    // The RFC 6901 examples.
     let doc = try pkg::parse("{\"foo\": [\"bar\", \"baz\"], \"\": 0, \"a/b\": 1, \"c%d\": 2, \"e^f\": 3, \"g|h\": 4, \"i\\\\j\": 5, \"k\\\"l\": 6, \" \": 7, \"m~n\": 8}") catch e { panic(f"{e}"); };
     expect(doc.pointer("") == doc, "whole");
     expect(doc.pointer("/foo") == (try pkg::parse("[\"bar\", \"baz\"]") catch _ { Value::Null }), "/foo");
@@ -250,7 +251,7 @@ struct Id(u64);
 struct Config {
     name: str;
     servers: List<Server>;
-    limits: OrderedDict<str, i32>;
+    limits: Dict<str, i32>;
     shapes: List<Shape>;
     ids: Dict<u32, Id>;
     pair: (str, f32);
@@ -278,7 +279,7 @@ fn typed_round_trip() {
     expect(c.shapes == [Shape::Dot, Shape::Circle(1.5), Shape::Pair(1, 2), Shape::Rect { w: 2.0, h: none }], f"{c.shapes:?}");
     expect(c.ids[7u32] == Id(70u64), "int keys");
     expect(c.pair.1 == 0.1f32, "f32");
-    let text = pkg::to_string(c);
+    let text = pkg::to_str(c);
     expect(text.contains("\"pair\":[\"x\",0.1]"), text);
     expect(text.contains("\"tls\":null"), text);
     let back: Config = try pkg::from_str(text) catch e { panic(f"{e}: {text}"); };
@@ -288,7 +289,7 @@ fn typed_round_trip() {
 }
 
 fn typed_err(s: str) -> str {
-    try pkg::from_str::<Config>(s) catch e { return f"{e} [{e.path}]"; };
+    try pkg::from_str::<Config>(s) catch e { return f"{e} [{e.path()}]"; };
     "ok"
 }
 
@@ -309,4 +310,21 @@ fn typed_errors() {
     expect(e6 == "4:31: expected i32, found string [/limits/mem]", e6);
 }
 
-// `rok bench`: 6.8 MB of mixed records.
+// Not Clone: each slot takes its own item.
+#[derive(Json, PartialEq, Debug)]
+struct Pt { x: i64; y: i64; }
+
+fn arr_err(s: str) -> str {
+    try pkg::from_str::<[i64; 2]>(s) catch e { return f"{e}"; };
+    "ok"
+}
+
+#[test]
+fn fixed_arrays() {
+    let a: [Pt; 2] = try pkg::from_str("[{\"x\": 1, \"y\": 2}, {\"x\": 3, \"y\": 4}]") catch e { panic(f"{e}"); };
+    expect(a[0] == Pt { x: 1, y: 2 } && a[1] == Pt { x: 3, y: 4 }, f"{a:?}");
+    let e: [i64; 0] = try pkg::from_str("[]") catch e { panic(f"{e}"); };
+    expect(e.len() == 0, "empty");
+    let n = arr_err("[1]");
+    expect(n.contains("expected 2 items, found 1"), n);
+}

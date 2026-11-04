@@ -1,4 +1,4 @@
-// Parse, serialize and build a large JSON document (spec 9.9.11).
+// Parse, serialize and build a large JSON document.
 
 use rok::core::bench::Bench;
 use rok::core::hint::black_box;
@@ -20,14 +20,14 @@ fn bench_doc() -> str {
 #[bench]
 fn parse_records(b: Bench) {
     let s = bench_doc();
-    b.bytes(s.len() as i64);
+    b.set_bytes(s.len() as i64);
     b.iter(|| try pkg::parse(black_box(s)) catch e { panic(f"{e}"); });
 }
 
 #[bench]
 fn serialize_records(b: Bench) {
     let v = try pkg::parse(bench_doc()) catch e { panic(f"{e}"); };
-    b.iter(|| black_box(v).to_string());
+    b.iter(|| black_box(v).to_str());
 }
 
 #[bench]

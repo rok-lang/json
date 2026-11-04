@@ -1,6 +1,6 @@
-// JSON (RFC 8259). `parse` reads a document into a `Value`, `to_string`
+// JSON (RFC 8259). `parse` reads a document into a `Value`, `to_str`
 // / `to_pretty` write one, and `ToJson` / `FromJson` (with
-// `#[derive(Json)]`) map rok types to and from `Value`, as std's
+// `#[derive(Json)]`) map Rok types to and from `Value`, as std's
 // `rokon` does for ROKON. `Tokenizer` reads large inputs as a stream of
 // `Event`s.
 //
@@ -25,19 +25,19 @@ pub enum Value {
     Float(f64),
     Str(str),
     Array(List<Value>),
-    Object(OrderedDict<str, Value>),
+    Object(Dict<str, Value>),
 }
 
 impl Value {
     /// Compact text. Panics on a NaN / infinite float.
-    pub fn to_string(self) -> str {
+    pub fn to_str(self) -> str {
         let out = StrBuf::new();
         write::value(out, self, 0, 0);
         out.to_str()
     }
 
     /// Text with each member on its own line, `indent` spaces per level
-    /// (`0` is `to_string`).
+    /// (`0` is `to_str`).
     pub fn to_pretty(self, indent: usize) -> str {
         let out = StrBuf::new();
         write::value(out, self, indent, 0);
@@ -135,7 +135,7 @@ impl Value {
         }
     }
 
-    pub fn as_object(self) -> OrderedDict<str, Value> | none {
+    pub fn as_object(self) -> Dict<str, Value> | none {
         match self {
             Value::Object(m) => m,
             _ => none,
@@ -144,7 +144,7 @@ impl Value {
 }
 
 impl Display for Value {
-    fn fmt(self, ref f: Formatter) throws (FmtError) { try f.write_str(self.to_string()) }
+    fn fmt(self, ref f: Formatter) throws (FmtError) { try f.write_str(self.to_str()) }
 }
 
 /// `k` as a JSON Pointer reference token (`~` -> `~0`, `/` -> `~1`).
@@ -176,10 +176,10 @@ fn unescape_token(t: str) -> str | none {
 /// when the value did not come from text; `path` is a JSON Pointer to the
 /// failing part (`/servers/2/port`, empty at the root).
 pub struct JsonError {
-    pub msg: str;
-    pub line: u32;
-    pub col: u32;
-    pub path: str;
+    pub(pkg) msg: str;
+    pub(pkg) line: u32;
+    pub(pkg) col: u32;
+    pub(pkg) path: str;
     /// The error is about an object key, not its value (`from_str`
     /// points at the key).
     pub(pkg) on_key: bool;
@@ -194,6 +194,15 @@ impl JsonError {
     pub fn within(self, seg: str) -> JsonError {
         JsonError { msg: self.msg, line: self.line, col: self.col, path: seg + self.path, on_key: self.on_key }
     }
+
+    /// What went wrong, without the position.
+    pub fn message(self) -> str { self.msg }
+    /// 1-based line, 0 when the value did not come from text.
+    pub fn line(self) -> u32 { self.line }
+    /// 1-based column in code points, 0 when the value did not come from text.
+    pub fn col(self) -> u32 { self.col }
+    /// JSON Pointer to the failing part, empty at the root.
+    pub fn path(self) -> str { self.path }
 
     pub(pkg) fn at_key(self) -> JsonError {
         JsonError { msg: self.msg, line: self.line, col: self.col, path: self.path, on_key: true }
@@ -219,12 +228,12 @@ impl Debug for JsonError {
 
 impl Error for JsonError {}
 
-/// A rok value as JSON.
+/// A Rok value as JSON.
 pub trait ToJson {
     fn to_json(self) -> Value;
 }
 
-/// A rok value from JSON; the target type decides how `v` reads.
+/// A Rok value from JSON; the target type decides how `v` reads.
 pub trait FromJson {
     fn from_json(v: Value) throws (JsonError) -> Self;
 
@@ -247,7 +256,7 @@ pub fn parse_tokens(t: Tokenizer) throws (JsonError) -> Value {
 }
 
 /// `x` as compact JSON. Panics on a NaN / infinite float.
-pub fn to_string<T: ToJson>(x: T) -> str { x.to_json().to_string() }
+pub fn to_str<T: ToJson>(x: T) -> str { x.to_json().to_str() }
 
 /// `x` as JSON indented by 2 spaces.
 pub fn to_pretty<T: ToJson>(x: T) -> str { x.to_json().to_pretty(2) }
@@ -260,10 +269,15 @@ pub fn from_str<T: FromJson>(s: str) throws (JsonError) -> T {
 }
 
 /// `x` as a `Value`.
-pub fn encode<T: ToJson>(x: T) -> Value { x.to_json() }
+pub fn to_value<T: ToJson>(x: T) -> Value { x.to_json() }
 
-/// `v` as a `T`, errors placed under `seg`.
-pub fn decode<T: FromJson>(v: Value, seg: str) throws (JsonError) -> T {
+/// `v` as a `T`.
+pub fn from_value<T: FromJson>(v: Value) throws (JsonError) -> T {
+    try T::from_json(v)
+}
+
+/// `from_value`, errors placed under `seg`.
+pub(pkg) fn from_value_at<T: FromJson>(v: Value, seg: str) throws (JsonError) -> T {
     try T::from_json(v) catch e { throw e.within(seg); }
 }
 
@@ -272,24 +286,26 @@ pub(pkg) fn mismatch<T>(v: Value) -> JsonError {
 }
 
 /// The pointer segment of member `k`.
-pub fn seg(k: str) -> str { "/" + escape_token(k) }
+pub(pkg) fn seg(k: str) -> str { "/" + escape_token(k) }
 
-// Used by `#[derive(Json)]`.
+// Derive support. The template's names resolve here, so these are
+// `pub(pkg)`; `dead_code` misses uses inside the template.
 
 /// The members read into a struct or a named variant.
-pub struct Fields {
-    vals: OrderedDict<str, Value>;
+pub(pkg) struct Fields {
+    vals: Dict<str, Value>;
     ctx: str;
 }
 
 impl Fields {
     /// `v` as the members of `ctx`; a member not in `names` is an error.
-    pub fn of(v: Value, ctx: str, names: List<str>) throws (JsonError) -> Fields {
+    #[allow(dead_code)]
+    pub(pkg) fn of(v: Value, ctx: str, names: List<str>) throws (JsonError) -> Fields {
         let m = match v {
             Value::Object(m) => m,
             _ => throw JsonError::new(f"expected {ctx} (an object), found {v.kind()}"),
         };
-        for (k, _) in m.entries() {
+        for (k, _) in m {
             if !names.iter().any(|n| n == k) {
                 throw JsonError::new(f"unknown field `{k}` in {ctx}").within(seg(k)).at_key();
             }
@@ -297,22 +313,25 @@ impl Fields {
         Fields { vals: m, ctx: ctx }
     }
 
-    pub fn has(self, name: str) -> bool { self.vals.contains_key(name) }
+    #[allow(dead_code)]
+    pub(pkg) fn has(self, name: str) -> bool { self.vals.contains_key(name) }
 
     /// Member `name` as a `T`: its value, or `T::from_missing()` when absent.
-    pub fn get<T: FromJson>(self, name: str) throws (JsonError) -> T {
-        if let v: Value = self.vals.get(name) { return try decode::<T>(v, seg(name)); }
+    pub(pkg) fn get<T: FromJson>(self, name: str) throws (JsonError) -> T {
+        if let v: Value = self.vals.get(name) { return try from_value_at::<T>(v, seg(name)); }
         try T::from_missing() catch _ { throw JsonError::new(f"missing field `{name}` in {self.ctx}"); }
     }
 }
 
 /// Tuple values as JSON: one value as itself, more as an array.
-pub fn pack(xs: List<Value>) -> Value {
+#[allow(dead_code)]
+pub(pkg) fn pack(xs: List<Value>) -> Value {
     if xs.len() == 1 { xs[0] } else { Value::Array(xs) }
 }
 
 /// `pack` reversed: `n` values of `ctx`.
-pub fn unpack(v: Value, ctx: str, n: usize) throws (JsonError) -> List<Value> {
+#[allow(dead_code)]
+pub(pkg) fn unpack(v: Value, ctx: str, n: usize) throws (JsonError) -> List<Value> {
     if n == 1 { return [v]; }
     let xs = match v {
         Value::Array(xs) => xs,
@@ -323,13 +342,14 @@ pub fn unpack(v: Value, ctx: str, n: usize) throws (JsonError) -> List<Value> {
 }
 
 /// `v` as a variant of enum `ctx`: `"V"` for a unit variant, else
-/// `{ "V": payload }`. (variant name, payload or `none`).
-pub fn variant_of(v: Value, ctx: str) throws (JsonError) -> (str, Value | none) {
+/// `{ "V": payload }`. Yields (variant name, payload or `none`).
+#[allow(dead_code)]
+pub(pkg) fn variant_of(v: Value, ctx: str) throws (JsonError) -> (str, Value | none) {
     match v {
         Value::Str(s) => (s, none),
         Value::Object(m) => {
             if m.len() != 1 { throw JsonError::new(f"expected a {ctx} variant (an object with one key), found {m.len()} keys"); }
-            let (k, x) = m.entries().next() ?? ("", Value::Null);
+            let (k, x) = m.into_iter().next() ?? ("", Value::Null);
             (k, x)
         },
         _ => throw JsonError::new(f"expected a {ctx} variant, found {v.kind()}"),
@@ -337,7 +357,8 @@ pub fn variant_of(v: Value, ctx: str) throws (JsonError) -> (str, Value | none) 
 }
 
 /// The payload of variant `name`; an error for a bare `"V"`.
-pub fn payload(p: Value | none, ctx: str, name: str) throws (JsonError) -> Value {
+#[allow(dead_code)]
+pub(pkg) fn payload(p: Value | none, ctx: str, name: str) throws (JsonError) -> Value {
     match p {
         x: Value => x,
         none => throw JsonError::new(f"variant `{ctx}::{name}` needs a value"),
@@ -345,13 +366,15 @@ pub fn payload(p: Value | none, ctx: str, name: str) throws (JsonError) -> Value
 }
 
 /// A unit variant written `{ "V": .. }` is an error unless the payload is null.
-pub fn no_payload(p: Value | none, ctx: str, name: str) throws (JsonError) {
+#[allow(dead_code)]
+pub(pkg) fn no_payload(p: Value | none, ctx: str, name: str) throws (JsonError) {
     if let x: Value = p {
         if x != Value::Null { throw JsonError::new(f"variant `{ctx}::{name}` takes no value").within(seg(name)); }
     }
 }
 
-pub fn unknown_variant(v: str, ctx: str) -> JsonError {
+#[allow(dead_code)]
+pub(pkg) fn unknown_variant(v: str, ctx: str) -> JsonError {
     JsonError::new(f"`{v}` is not a variant of {ctx}")
 }
 
@@ -368,15 +391,15 @@ pub @derive {
         fn to_json(self) -> pkg::Value {
             @if_struct {
                 @apply_if(@Self.is_tuple) {
-                    return pkg::pack([@for_fields { pkg::encode::<@field.type>(self.@field), }]);
+                    return pkg::pack([@for_fields { pkg::to_value::<@field.type>(self.@field), }]);
                 }
                 @apply_if(@Self.is_unit) {
                     return pkg::Value::Null;
                 }
                 @apply_if(@Self.is_named) {
-                    let m: OrderedDict<str, pkg::Value> = OrderedDict::new();
+                    let m: Dict<str, pkg::Value> = Dict::new();
                     @for_fields {
-                        m.insert(@field.name.as_str(), pkg::encode::<@field.type>(self.@field));
+                        _ = m.insert(@field.name.as_str(), pkg::to_value::<@field.type>(self.@field));
                     }
                     return pkg::Value::Object(m);
                 }
@@ -389,17 +412,17 @@ pub @derive {
                                 pkg::Value::Str(@variant.name.as_str())
                             }
                             @apply_if(@variant.is_tuple) {
-                                let m: OrderedDict<str, pkg::Value> = OrderedDict::new();
-                                m.insert(@variant.name.as_str(), pkg::pack([@for_variant_fields { pkg::encode::<@field.type>(@field), }]));
+                                let m: Dict<str, pkg::Value> = Dict::new();
+                                _ = m.insert(@variant.name.as_str(), pkg::pack([@for_variant_fields { pkg::to_value::<@field.type>(@field), }]));
                                 pkg::Value::Object(m)
                             }
                             @apply_if(@variant.is_named) {
-                                let fs: OrderedDict<str, pkg::Value> = OrderedDict::new();
+                                let fs: Dict<str, pkg::Value> = Dict::new();
                                 @for_variant_fields {
-                                    fs.insert(@field.name.as_str(), pkg::encode::<@field.type>(@field));
+                                    _ = fs.insert(@field.name.as_str(), pkg::to_value::<@field.type>(@field));
                                 }
-                                let m: OrderedDict<str, pkg::Value> = OrderedDict::new();
-                                m.insert(@variant.name.as_str(), pkg::Value::Object(fs));
+                                let m: Dict<str, pkg::Value> = Dict::new();
+                                _ = m.insert(@variant.name.as_str(), pkg::Value::Object(fs));
                                 pkg::Value::Object(m)
                             }
                         },
@@ -416,7 +439,7 @@ pub @derive {
                 @apply_if(@Self.is_tuple) {
                     let xs = try pkg::unpack(v, @Self.as_str(), [@for_fields { 0, }].len());
                     return @Self(@for_fields {
-                        try pkg::decode::<@field.type>(xs[@field.name], if xs.len() == 1 { "" } else { "/" + @field.name.as_str() }),
+                        try pkg::from_value_at::<@field.type>(xs[@field.name], if xs.len() == 1 { "" } else { "/" + @field.name.as_str() }),
                     });
                 }
                 @apply_if(@Self.is_unit) {
@@ -454,7 +477,7 @@ pub @derive {
                             let ctx = @Self.as_str() + "::" + name;
                             let xs = try pkg::unpack(try pkg::payload(p, @Self.as_str(), name), ctx, n) catch e { throw e.within(pkg::seg(name)); };
                             return @Self.name::@variant.name(@for_variant_fields {
-                                try pkg::decode::<@field.type>(xs[@field.name], pkg::seg(name) + if n == 1 { "" } else { "/" + @field.name.as_str() }),
+                                try pkg::from_value_at::<@field.type>(xs[@field.name], pkg::seg(name) + if n == 1 { "" } else { "/" + @field.name.as_str() }),
                             });
                         }
                         @apply_if(@variant.is_named) {

@@ -1,5 +1,4 @@
-// ToJson / FromJson for the built-in types and collections. The Value
-// model, the public API and the derive-support helpers are in lib.rok.
+// ToJson / FromJson for the built-in types and collections.
 
 use pkg::*;
 
@@ -73,7 +72,7 @@ fn out_of_range<T>(n: int) -> JsonError {
     JsonError::new(f"integer {n} is out of range for {T::type_name()}")
 }
 
-// ToJson / FromJson for every integer type (spec 6.8.12).
+// ToJson / FromJson for every integer type.
 #[impl_macro(json_int)] @macro {
     (@rep[sep = ","] { @t: ty }) => {
         @for @t {
@@ -169,7 +168,7 @@ impl<T: FromJson> FromJson for List<T> {
         let out: List<T> = List::with_capacity(xs.len());
         let i = 0usize;
         for x in xs {
-            out.push(try decode::<T>(x, f"/{i}"));
+            out.push(try from_value_at::<T>(x, f"/{i}"));
             i += 1;
         }
         out
@@ -192,22 +191,6 @@ impl<T: FromJson + Hash> FromJson for Set<T> {
     }
 }
 
-impl<T: ToJson + Hash> ToJson for OrderedSet<T> {
-    fn to_json(self) -> Value {
-        let out: List<Value> = List::with_capacity(self.len());
-        for x in self { out.push(x.to_json()); }
-        Value::Array(out)
-    }
-}
-
-impl<T: FromJson + Hash> FromJson for OrderedSet<T> {
-    fn from_json(v: Value) throws (JsonError) -> OrderedSet<T> {
-        let out: OrderedSet<T> = OrderedSet::new();
-        for x in try List::<T>::from_json(v) { out.insert(x); }
-        out
-    }
-}
-
 impl<T: ToJson, const N: usize> ToJson for [T; N] {
     fn to_json(self) -> Value {
         let out: List<Value> = List::with_capacity(N);
@@ -220,11 +203,12 @@ impl<T: FromJson, const N: usize> FromJson for [T; N] {
     fn from_json(v: Value) throws (JsonError) -> [T; N] {
         let xs = try List::<T>::from_json(v);
         if xs.len() != N { throw JsonError::new(f"expected {N} items, found {xs.len()}"); }
-        // The array is seeded with its first item: `[T; 0]` cannot be read.
-        if N == 0 { throw JsonError::new("cannot read a zero-length array"); }
-        let out: [T; N] = [xs[0]; N];
-        for i in 1..N { out[i] = xs[i]; }
-        out
+        // Each slot takes the next item: no element is copied.
+        let i = 0;
+        [(); N].map([ref i] |_| {
+            i += 1;
+            xs[i - 1]
+        })
     }
 
     fn from_missing() throws (JsonError) -> [T; N] {
@@ -245,14 +229,14 @@ fn key_text(k: Value) -> str {
 /// Object key `k` as a `K`: as a string, else as the integer it spells.
 fn key_of<K: FromJson>(k: str) throws (JsonError) -> K {
     try K::from_json(Value::Str(k)) catch e {
-        if let n: int = Int::parse_radix(k, 10u32) {
+        if let n: int = try? Int::parse_radix(k, 10u32) {
             return try K::from_json(Value::Int(n)) catch _ { throw e.within(seg(k)).at_key(); };
         }
         throw e.within(seg(k)).at_key();
     }
 }
 
-fn entries_of<T>(v: Value) throws (JsonError) -> OrderedDict<str, Value> {
+fn entries_of<T>(v: Value) throws (JsonError) -> Dict<str, Value> {
     match v {
         Value::Object(m) => m,
         _ => throw mismatch::<T>(v),
@@ -262,8 +246,8 @@ fn entries_of<T>(v: Value) throws (JsonError) -> OrderedDict<str, Value> {
 /// Keys are written as `key_text` (strings, integers, bools).
 impl<K: ToJson + Hash, V: ToJson> ToJson for Dict<K, V> {
     fn to_json(self) -> Value {
-        let out: OrderedDict<str, Value> = OrderedDict::new();
-        for (k, v) in self.entries() { out.insert(key_text(k.to_json()), v.to_json()); }
+        let out: Dict<str, Value> = Dict::new();
+        for (k, v) in self { out.insert(key_text(k.to_json()), v.to_json()); }
         Value::Object(out)
     }
 }
@@ -271,26 +255,8 @@ impl<K: ToJson + Hash, V: ToJson> ToJson for Dict<K, V> {
 impl<K: FromJson + Hash, V: FromJson> FromJson for Dict<K, V> {
     fn from_json(v: Value) throws (JsonError) -> Dict<K, V> {
         let out: Dict<K, V> = Dict::new();
-        for (k, x) in (try entries_of::<Dict<K, V>>(v)).entries() {
-            out.insert(try key_of::<K>(k), try decode::<V>(x, seg(k)));
-        }
-        out
-    }
-}
-
-impl<K: ToJson + Hash, V: ToJson> ToJson for OrderedDict<K, V> {
-    fn to_json(self) -> Value {
-        let out: OrderedDict<str, Value> = OrderedDict::new();
-        for (k, v) in self.entries() { out.insert(key_text(k.to_json()), v.to_json()); }
-        Value::Object(out)
-    }
-}
-
-impl<K: FromJson + Hash, V: FromJson> FromJson for OrderedDict<K, V> {
-    fn from_json(v: Value) throws (JsonError) -> OrderedDict<K, V> {
-        let out: OrderedDict<K, V> = OrderedDict::new();
-        for (k, x) in (try entries_of::<OrderedDict<K, V>>(v)).entries() {
-            out.insert(try key_of::<K>(k), try decode::<V>(x, seg(k)));
+        for (k, x) in try entries_of::<Dict<K, V>>(v) {
+            out.insert(try key_of::<K>(k), try from_value_at::<V>(x, seg(k)));
         }
         out
     }
@@ -309,7 +275,7 @@ impl<A: ToJson> ToJson for (A,) {
 impl<A: FromJson> FromJson for (A,) {
     fn from_json(v: Value) throws (JsonError) -> (A,) {
         let xs = try tuple_of::<(A,)>(v, 1);
-        (try decode::<A>(xs[0], "/0"),)
+        (try from_value_at::<A>(xs[0], "/0"),)
     }
 }
 impl<A: ToJson, B: ToJson> ToJson for (A, B) {
@@ -318,7 +284,7 @@ impl<A: ToJson, B: ToJson> ToJson for (A, B) {
 impl<A: FromJson, B: FromJson> FromJson for (A, B) {
     fn from_json(v: Value) throws (JsonError) -> (A, B) {
         let xs = try tuple_of::<(A, B)>(v, 2);
-        (try decode::<A>(xs[0], "/0"), try decode::<B>(xs[1], "/1"))
+        (try from_value_at::<A>(xs[0], "/0"), try from_value_at::<B>(xs[1], "/1"))
     }
 }
 impl<A: ToJson, B: ToJson, C: ToJson> ToJson for (A, B, C) {
@@ -327,7 +293,7 @@ impl<A: ToJson, B: ToJson, C: ToJson> ToJson for (A, B, C) {
 impl<A: FromJson, B: FromJson, C: FromJson> FromJson for (A, B, C) {
     fn from_json(v: Value) throws (JsonError) -> (A, B, C) {
         let xs = try tuple_of::<(A, B, C)>(v, 3);
-        (try decode::<A>(xs[0], "/0"), try decode::<B>(xs[1], "/1"), try decode::<C>(xs[2], "/2"))
+        (try from_value_at::<A>(xs[0], "/0"), try from_value_at::<B>(xs[1], "/1"), try from_value_at::<C>(xs[2], "/2"))
     }
 }
 impl<A: ToJson, B: ToJson, C: ToJson, D: ToJson> ToJson for (A, B, C, D) {
@@ -336,7 +302,7 @@ impl<A: ToJson, B: ToJson, C: ToJson, D: ToJson> ToJson for (A, B, C, D) {
 impl<A: FromJson, B: FromJson, C: FromJson, D: FromJson> FromJson for (A, B, C, D) {
     fn from_json(v: Value) throws (JsonError) -> (A, B, C, D) {
         let xs = try tuple_of::<(A, B, C, D)>(v, 4);
-        (try decode::<A>(xs[0], "/0"), try decode::<B>(xs[1], "/1"), try decode::<C>(xs[2], "/2"), try decode::<D>(xs[3], "/3"))
+        (try from_value_at::<A>(xs[0], "/0"), try from_value_at::<B>(xs[1], "/1"), try from_value_at::<C>(xs[2], "/2"), try from_value_at::<D>(xs[3], "/3"))
     }
 }
 impl<A: ToJson, B: ToJson, C: ToJson, D: ToJson, E: ToJson> ToJson for (A, B, C, D, E) {
@@ -345,7 +311,7 @@ impl<A: ToJson, B: ToJson, C: ToJson, D: ToJson, E: ToJson> ToJson for (A, B, C,
 impl<A: FromJson, B: FromJson, C: FromJson, D: FromJson, E: FromJson> FromJson for (A, B, C, D, E) {
     fn from_json(v: Value) throws (JsonError) -> (A, B, C, D, E) {
         let xs = try tuple_of::<(A, B, C, D, E)>(v, 5);
-        (try decode::<A>(xs[0], "/0"), try decode::<B>(xs[1], "/1"), try decode::<C>(xs[2], "/2"), try decode::<D>(xs[3], "/3"), try decode::<E>(xs[4], "/4"))
+        (try from_value_at::<A>(xs[0], "/0"), try from_value_at::<B>(xs[1], "/1"), try from_value_at::<C>(xs[2], "/2"), try from_value_at::<D>(xs[3], "/3"), try from_value_at::<E>(xs[4], "/4"))
     }
 }
 impl<A: ToJson, B: ToJson, C: ToJson, D: ToJson, E: ToJson, F: ToJson> ToJson for (A, B, C, D, E, F) {
@@ -354,6 +320,6 @@ impl<A: ToJson, B: ToJson, C: ToJson, D: ToJson, E: ToJson, F: ToJson> ToJson fo
 impl<A: FromJson, B: FromJson, C: FromJson, D: FromJson, E: FromJson, F: FromJson> FromJson for (A, B, C, D, E, F) {
     fn from_json(v: Value) throws (JsonError) -> (A, B, C, D, E, F) {
         let xs = try tuple_of::<(A, B, C, D, E, F)>(v, 6);
-        (try decode::<A>(xs[0], "/0"), try decode::<B>(xs[1], "/1"), try decode::<C>(xs[2], "/2"), try decode::<D>(xs[3], "/3"), try decode::<E>(xs[4], "/4"), try decode::<F>(xs[5], "/5"))
+        (try from_value_at::<A>(xs[0], "/0"), try from_value_at::<B>(xs[1], "/1"), try from_value_at::<C>(xs[2], "/2"), try from_value_at::<D>(xs[3], "/3"), try from_value_at::<E>(xs[4], "/4"), try from_value_at::<F>(xs[5], "/5"))
     }
 }
