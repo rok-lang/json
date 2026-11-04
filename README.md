@@ -13,6 +13,8 @@ streaming tokenizer for large inputs, typed conversion with
 rok add json
 ```
 
+Needs Rok 0.2 or later; Rok 0.1 is no longer supported and cannot read the stone index.
+
 ## Usage
 
 ```rok
